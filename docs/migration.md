@@ -1,5 +1,7 @@
 # Première tranche — migration non destructive
 
+> **État 30/10/2026 :** la PR Compose #295 est fusionnée ; la PR #1 de ce dépôt reste Draft. Cette page décrit la première tranche, pas un cutover. Suivi des étapes et critères DONE dans [la roadmap](roadmap.md).
+
 Source : `AlbanAndrieu/nabla-compose`, PR #295.
 Les fichiers importés en phase initiale gardent **exactement** leurs
 chemins d'origine pour préserver les imports dans les tests. La

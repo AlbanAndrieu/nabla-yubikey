@@ -5,7 +5,7 @@
 Dépôt dédié aux **contrôles, tests hermétiques et procédures de
 restauration YubiKey/age/SOPS/SSH-FIDO2**. Il succède progressivement
 aux 84 recettes `yubikey-*` de
-[Compose PR #295](https://github.com/AlbanAndrieu/nabla-compose/pull/295).
+[Compose PR #295](https://github.com/AlbanAndrieu/nabla-compose/pull/295) (désormais fusionnée).
 
 ## Périmètre
 
@@ -38,5 +38,5 @@ Le dépôt est **public**. Ne jamais y committer des identités
 La migration se fait par **copies de fichiers sélectionnés +
 tests/fixturés**, jamais par réécriture aveugle de l'historique Git.
 
-Voir [plan de migration](docs/migration.md). Le submodule dans
+Voir [roadmap priorisée](docs/roadmap.md) et [plan de migration](docs/migration.md). Le submodule dans
 `nabla-compose` sera étudié après une première release locale testée.
