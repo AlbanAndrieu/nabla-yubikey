@@ -1,0 +1,26 @@
+# Personal credentials, security tokens, encrypted backup artifacts and runtime
+.env
+.env.*
+!.env.example
+*.age
+*.key
+*.pem
+*.p12
+*.pfx
+*.asc
+*.gpg
+secrets.env.sops
+.sops.yaml
+**/recovery-identity.txt
+**/id_ed25519*
+**/id_rsa*
+**/.gnupg/
+**/.ssh/
+**/.config/Yubico/
+**/private/
+**/runtime/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.mise/
