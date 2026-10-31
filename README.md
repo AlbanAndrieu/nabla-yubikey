@@ -38,5 +38,6 @@ Le dépôt est **public**. Ne jamais y committer des identités
 La migration se fait par **copies de fichiers sélectionnés +
 tests/fixturés**, jamais par réécriture aveugle de l'historique Git.
 
-Voir [roadmap priorisée](docs/roadmap.md) et [plan de migration](docs/migration.md). Le submodule dans
+Voir [roadmap priorisée](docs/roadmap.md), [plan de migration](docs/migration.md) et
+[runbook SSH FIDO2](docs/runbooks/ssh-fido2.md). Le submodule dans
 `nabla-compose` sera étudié après une première release locale testée.

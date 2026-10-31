@@ -8,6 +8,7 @@
 - **Lot 1 importé dans cette PR** : `inspect-yubikey-dependencies-readonly.py` et ses tests hermétiques ; aucun accès smartcard, aucune modification système. Le `justfile` contient `test` et `dependencies-readonly`.
 - `nabla-compose` [PR #295](https://github.com/AlbanAndrieu/nabla-compose/pull/295) **fusionnée** : les anciennes recettes et scripts YubiKey restent la référence temporaire jusqu'à parité documentée.
 - Les prérequis OS sont déjà traités par `ansible-workstation` ; ne pas réintroduire de tâches PAM globales.
+- **31/10** : clé SSH FIDO2 résidente générée sur décision explicite et signature via `gcr-ssh-agent` PASS ; procédure et piège askpass/Wayland dans le [runbook SSH FIDO2](runbooks/ssh-fido2.md). Déploiement `authorized_keys`/GitHub non fait.
 
 ## File de travail priorisée
 
