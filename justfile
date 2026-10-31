@@ -11,3 +11,6 @@ dependencies-readonly:
 
 ssh-fido2-readonly:
     python3 scripts/workstation/inspect-ssh-fido2-readonly.py
+
+applets-readonly:
+    python3 scripts/workstation/inspect-yubikey-applets-readonly.py
