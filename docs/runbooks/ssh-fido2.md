@@ -35,6 +35,26 @@ ssh-keygen -t ed25519-sk -O resident -O verify-required \
 
 Conséquence : **PIN + toucher à chaque signature** (connexion `ssh`, `git push` SSH, commit signé SSH). Pour réduire la fréquence : `ControlMaster auto` / `ControlPersist` dans `~/.ssh/config` (une authentification par connexion maîtresse), ou régénérer **sans** `verify-required` (toucher seul, le PIN n'est plus demandé : arbitrage de sécurité à décider explicitement).
 
+## `~/.ssh/config` (attesté avec GitHub le 31/10)
+
+ssh retient la **première** valeur lue : un `Host *` placé avant fait proposer `id_ed25519` d'abord, la YubiKey n'est alors jamais sollicitée. Mettre le bloc avant `Host *` :
+
+```sshconfig
+Host github.com
+  User git
+  PreferredAuthentications publickey
+  IdentityFile ~/.ssh/id_ed25519_sk
+  IdentityFile ~/.ssh/id_ed25519
+  ControlPersist 1h
+
+Host *
+  ControlMaster auto
+  ControlPath ~/.ssh/cm-%r@%h:%p
+  ControlPersist 10m
+```
+
+Contrôle : `ssh -G github.com | grep -E '^(identityfile|controlpersist) '`, puis `ssh -T github.com` (PIN demandé) et `ssh -O check github.com` (connexion maîtresse active, pas de nouveau PIN).
+
 ## Piège GNOME/Wayland : « agent refused operation »
 
 `gcr-ssh-agent` demande le PIN via `/usr/bin/ssh-askpass` (`x11-ssh-askpass`), qui ne peut pas saisir le clavier sous Wayland et renvoie un PIN vide. Le compteur FIDO2 n'est pas décrémenté.
