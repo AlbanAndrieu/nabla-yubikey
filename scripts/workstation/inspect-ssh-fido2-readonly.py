@@ -8,6 +8,7 @@ and never prints key material, fingerprints or paths.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -35,13 +36,18 @@ def ssh_config(host: str) -> dict[str, list[str]] | None:
     return options
 
 
+def is_sk(path: str) -> bool:
+    """Security-key handles are named id_<type>_sk, optionally with a _<label> suffix."""
+    return re.search(r"_sk(_[^/]*)?$", path) is not None
+
+
 def identity_order(options: dict[str, list[str]] | None) -> str:
     if options is None:
         return "UNKNOWN"
     files = options.get("identityfile", [])
-    if not any(path.endswith("_sk") for path in files):
+    if not any(is_sk(path) for path in files):
         return "SK_NOT_OFFERED"
-    return "SK_FIRST" if files[0].endswith("_sk") else "SK_NOT_FIRST"
+    return "SK_FIRST" if is_sk(files[0]) else "SK_NOT_FIRST"
 
 
 def file_key_offered(options: dict[str, list[str]] | None) -> str:
@@ -49,7 +55,7 @@ def file_key_offered(options: dict[str, list[str]] | None) -> str:
     if options is None:
         return "UNKNOWN"
     files = options.get("identityfile", [])
-    return "FILE_KEY_OFFERED" if any(not path.endswith("_sk") for path in files) else "FILE_KEY_MISSING"
+    return "FILE_KEY_OFFERED" if any(not is_sk(path) for path in files) else "FILE_KEY_MISSING"
 
 
 def forward_agent(options: dict[str, list[str]] | None) -> str:
@@ -107,11 +113,14 @@ def commit_signing_state() -> str:
 
 
 def snapshot() -> dict:
-    github = identity_order(ssh_config(GIT_HOST))
+    github_options = ssh_config(GIT_HOST)
+    github = identity_order(github_options)
     servers = {host: ssh_config(host) for host in SERVER_HOSTS}
     report = {
         "mode": "SSH_FIDO2_LOCAL_CONFIG_ONLY",
         "github_identity": github,
+        # Agent keys are tried in agent order: an offered file key signs without PIN when a YubiKey is absent.
+        "github_file_key": file_key_offered(github_options),
         "server_identity": {host: file_key_offered(opts) for host, opts in servers.items()},
         "server_agent_forwarding": {host: forward_agent(opts) for host, opts in servers.items()},
         "agent_askpass": askpass_state(agent_environment()),
@@ -119,7 +128,7 @@ def snapshot() -> dict:
         "ssh_fido_login_verified": False,
         "hardware_mutation_authorized": False,
     }
-    ok = (github == "SK_FIRST"
+    ok = (github == "SK_FIRST" and report["github_file_key"] == "FILE_KEY_MISSING"
           and all(state == "FILE_KEY_OFFERED" for state in report["server_identity"].values())
           and all(state == "NOT_FORWARDED" for state in report["server_agent_forwarding"].values())
           and report["agent_askpass"] != "X11_ASKPASS_UNDER_WAYLAND"

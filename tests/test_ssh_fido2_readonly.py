@@ -16,7 +16,7 @@ spec = importlib.util.spec_from_file_location("ssh_fido2_readonly", SOURCE)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
-GITHUB = "user git\nidentityfile ~/.ssh/id_ed25519_sk\nidentityfile ~/.ssh/id_ed25519\nforwardagent no\n"
+GITHUB = "user git\nidentityfile ~/.ssh/id_ed25519_sk_principale\nidentityfile ~/.ssh/id_ed25519_sk\nforwardagent no\n"
 SERVER = "user albandrieu\nidentityfile ~/.ssh/id_ed25519_sk\nidentityfile ~/.ssh/id_ed25519\nforwardagent no\n"
 AGENT_ENV = "HOME=/home/u\nSSH_ASKPASS=/usr/libexec/seahorse/ssh-askpass\nWAYLAND_DISPLAY=wayland-0\nGITHUB_TOKEN=x\n"
 SIGNING = {"commit.gpgsign": "true\n", "gpg.format": ""}
@@ -48,7 +48,7 @@ class SshFido2Contracts(unittest.TestCase):
             options = module.ssh_config("github.com")
         self.assertEqual(run.call_args.args[0], ["ssh", "-G", "github.com"])
         self.assertEqual(run.call_args.kwargs["stdin"], subprocess.DEVNULL)
-        self.assertEqual(options["identityfile"][0], "~/.ssh/id_ed25519_sk")
+        self.assertEqual(options["identityfile"][0], "~/.ssh/id_ed25519_sk_principale")
         with patch.object(module.shutil, "which", return_value="/usr/bin/ssh"), \
              patch.object(module.subprocess, "run",
                           return_value=SimpleNamespace(returncode=0, stdout="x" * 70000)):
@@ -70,6 +70,14 @@ class SshFido2Contracts(unittest.TestCase):
         self.assertEqual(module.identity_order({"identityfile": ["b", "a_sk"]}), "SK_NOT_FIRST")
         self.assertEqual(module.identity_order({"identityfile": ["b"]}), "SK_NOT_OFFERED")
         self.assertEqual(module.identity_order({}), "SK_NOT_OFFERED")
+
+    def test_labelled_security_key_is_not_a_file_key(self):
+        self.assertTrue(module.is_sk("~/.ssh/id_ed25519_sk_principale"))
+        self.assertTrue(module.is_sk("~/.ssh/id_ecdsa_sk"))
+        self.assertFalse(module.is_sk("~/.ssh/id_ed25519"))
+        self.assertFalse(module.is_sk("~/.ssh/task_skeleton/id_ed25519"))
+        self.assertEqual(module.file_key_offered({"identityfile": ["~/.ssh/id_ed25519_sk_principale"]}),
+                         "FILE_KEY_MISSING")
 
     def test_askpass_x11_under_wayland_is_blocking(self):
         wayland = {"WAYLAND_DISPLAY": "wayland-0"}
@@ -123,6 +131,9 @@ class SshFido2Contracts(unittest.TestCase):
         self.assertEqual(snapshot_with(pfsense=SERVER.replace("forwardagent no", "forwardagent yes"))["status"],
                          "NO-GO")
         self.assertEqual(snapshot_with(systemctl="WAYLAND_DISPLAY=wayland-0\n")["status"], "NO-GO")
+        sk_then_file = GITHUB + "identityfile ~/.ssh/id_ed25519\n"
+        report = snapshot_with(**{"github.com": sk_then_file})
+        self.assertEqual((report["github_file_key"], report["status"]), ("FILE_KEY_OFFERED", "NO-GO"))
         file_first = "identityfile ~/.ssh/id_ed25519\nidentityfile ~/.ssh/id_ed25519_sk\n"
         self.assertEqual(snapshot_with(**{"github.com": file_first})["status"], "NO-GO")
 

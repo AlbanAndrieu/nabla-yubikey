@@ -14,3 +14,6 @@ ssh-fido2-readonly:
 
 applets-readonly:
     python3 scripts/workstation/inspect-yubikey-applets-readonly.py
+
+keepassxc-readonly:
+    python3 scripts/workstation/inspect-keepassxc-readonly.py

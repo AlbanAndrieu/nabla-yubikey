@@ -35,12 +35,14 @@ Management key is stored on the YubiKey, protected by PIN.
 Slot 9A (AUTHENTICATION):
   Subject DN:       CN=private-name
 """
-OUTPUTS = {"list": LIST, "info": DEVICE, "fido": FIDO, "openpgp": OPENPGP, "piv": PIV}
+OTP = "Slot 1: programmed\nSlot 2: empty\n"
+OUTPUTS = {"list": LIST, "serials": "12345678\n", "info": DEVICE, "fido": FIDO, "openpgp": OPENPGP,
+           "piv": PIV, "otp": OTP}
 
 
 def fake_run(outputs):
     def run(command, **kwargs):
-        value = outputs[command[1]]
+        value = outputs["serials" if command[1:] == ["list", "--serials"] else command[1]]
         if value is None:
             return SimpleNamespace(returncode=1, stdout="")
         return SimpleNamespace(returncode=0, stdout=value)
@@ -59,10 +61,28 @@ class AppletContracts(unittest.TestCase):
              patch.object(module.subprocess, "run", side_effect=fake_run(OUTPUTS)) as run:
             module.snapshot()
         commands = [call.args[0] for call in run.call_args_list]
-        self.assertEqual(commands, [["ykman", "list"], ["ykman", "info"], ["ykman", "fido", "info"],
-                                    ["ykman", "openpgp", "info"], ["ykman", "piv", "info"]])
+        self.assertEqual(commands, [["ykman", "list"], ["ykman", "list", "--serials"], ["ykman", "info"],
+                                    ["ykman", "fido", "info"], ["ykman", "openpgp", "info"],
+                                    ["ykman", "piv", "info"], ["ykman", "otp", "info"]])
         for call in run.call_args_list:
             self.assertEqual(call.kwargs["stdin"], subprocess.DEVNULL)
+
+    def test_role_from_local_last4_mapping_never_returns_serial(self):
+        self.assertEqual(module.device_role("12345678\n", "5678=principale,1111=secours"), "principale")
+        self.assertEqual(module.device_role("12345678\n", "1111=secours"), "UNLABELED")
+        self.assertEqual(module.device_role("12345678\n87654321\n", "5678=principale"), "UNKNOWN")
+        self.assertEqual(module.device_role("12345678\n", "5678=$(rm -rf)"), "UNLABELED")
+        with patch.dict(module.os.environ, {"YUBIKEY_ROLES": "5678=principale"}):
+            report = snapshot_with()
+        self.assertEqual(report["role"], "principale")
+        self.assertEqual(report["otp"], {"slot1": True, "slot2": False})
+
+    def test_unrecognized_otp_output_is_unreadable_not_empty(self):
+        self.assertIsNone(module.parse_otp(""))
+        self.assertIsNone(module.parse_otp("Slot 1: programmed\n"))
+        report = snapshot_with(otp="Device busy\n")
+        self.assertIsNone(report["otp"])
+        self.assertIn("OTP_UNREADABLE", report["blocking"])
 
     def test_go_report_never_leaks_serial_subject_or_aaguid(self):
         out = io.StringIO()

@@ -7,6 +7,7 @@ number, certificate subjects or fingerprints: only counters and flags.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -17,6 +18,7 @@ COMMANDS = {
     "fido": ["fido", "info"],
     "openpgp": ["openpgp", "info"],
     "piv": ["piv", "info"],
+    "otp": ["otp", "info"],
 }
 
 
@@ -33,6 +35,29 @@ def ykman(args: list[str]) -> str | None:
     if done.returncode != 0 or len(done.stdout) > 65536 or "\x00" in done.stdout:
         return None
     return done.stdout
+
+
+def device_role(serials: str | None, roles: str) -> str:
+    """Map the serial's last 4 digits to a local label (YUBIKEY_ROLES="1234=principale,5678=secours").
+
+    The mapping stays in the operator's environment; the serial is never returned.
+    """
+    lines = [] if serials is None else [line.strip() for line in serials.splitlines() if line.strip()]
+    if len(lines) != 1 or not lines[0].isdigit():
+        return "UNKNOWN"
+    for pair in roles.split(","):
+        last4, _, label = pair.strip().partition("=")
+        if last4 and last4 == lines[0][-4:] and label.isidentifier():
+            return label
+    return "UNLABELED"
+
+
+def parse_otp(raw: str) -> dict | None:
+    """None unless both slots are reported: a busy device must not read as an empty slot."""
+    states = dict(re.findall(r"^Slot ([12]): (programmed|empty)$", raw, re.MULTILINE))
+    if set(states) != {"1", "2"}:
+        return None
+    return {f"slot{n}": states[n] == "programmed" for n in ("1", "2")}
 
 
 def device_count(raw: str | None) -> int | None:
@@ -80,7 +105,7 @@ def assess(report: dict) -> tuple[list[str], list[str]]:
     """Blocking findings make the inventory NO-GO; advice never does."""
     blocking, advice = [], []
     fido, openpgp, piv = report["fido"], report["openpgp"], report["piv"]
-    for name in ("device", "fido", "openpgp", "piv"):
+    for name in ("device", "fido", "openpgp", "piv", "otp"):
         if report[name] is None:
             blocking.append(f"{name.upper()}_UNREADABLE")
     if fido and not fido["pin_set"]:
@@ -112,7 +137,9 @@ def snapshot() -> dict:
     if count != 1:
         report.update(status="NO-GO", blocking=["DEVICE_COUNT_NOT_ONE"], advice=[])
         return report
-    parsers = {"device": parse_device, "fido": parse_fido, "openpgp": parse_openpgp, "piv": parse_piv}
+    report["role"] = device_role(ykman(["list", "--serials"]), os.environ.get("YUBIKEY_ROLES", ""))
+    parsers = {"device": parse_device, "fido": parse_fido, "openpgp": parse_openpgp, "piv": parse_piv,
+               "otp": parse_otp}
     for name, args in COMMANDS.items():
         raw = ykman(args)
         report[name] = parsers[name](raw) if raw is not None else None
