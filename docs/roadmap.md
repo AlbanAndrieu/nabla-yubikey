@@ -5,10 +5,10 @@
 ## État vérifié dans Git
 
 - Dépôt dédié créé ; PR [#1](https://github.com/AlbanAndrieu/nabla-yubikey/pull/1) **Draft, non fusionnée** au contrôle du 30/10.
-- **Lot 1 importé dans cette PR** : `inspect-yubikey-dependencies-readonly.py` et ses tests hermétiques ; aucun accès smartcard, aucune modification système. Le `justfile` contient `test` et `dependencies-readonly`.
+- **Lot 1 importé dans cette PR** : `inspect-yubikey-dependencies-readonly.py` et ses tests hermétiques ; aucun accès smartcard, aucune modification système. Le `justfile` contient `test`, `dependencies-readonly` et `ssh-fido2-readonly`.
 - `nabla-compose` [PR #295](https://github.com/AlbanAndrieu/nabla-compose/pull/295) **fusionnée** : les anciennes recettes et scripts YubiKey restent la référence temporaire jusqu'à parité documentée.
 - Les prérequis OS sont déjà traités par `ansible-workstation` ; ne pas réintroduire de tâches PAM globales.
-- **31/10** : clé SSH FIDO2 résidente générée sur décision explicite et signature via `gcr-ssh-agent` PASS ; procédure et piège askpass/Wayland dans le [runbook SSH FIDO2](runbooks/ssh-fido2.md). Déploiement `authorized_keys`/GitHub non fait.
+- **31/10** : clé SSH FIDO2 résidente générée sur décision explicite et signature via `gcr-ssh-agent` PASS ; procédure et piège askpass/Wayland dans le [runbook SSH FIDO2](runbooks/ssh-fido2.md). Clé publique ajoutée sur GitHub (push PASS, PIN demandé) ; commits signés OpenPGP « Verified ». truenas/pfsense restent sur `id_ed25519`, sans transfert d'agent. Sonde `just ssh-fido2-readonly` : **GO**.
 
 ## File de travail priorisée
 
@@ -18,7 +18,7 @@
 | P0 | 2 — lecture seule Workstation | Inventaire des commandes YubiKey actuellement exécutées depuis Compose ; tests host, GPG-agent, PC/SC, versions, état SSH-sk/FIDO2 **sans PIN ni données personnelles** | **À importer** avec les tests et états `UNKNOWN/NO-GO` |
 | P0 | 3 — récupération age/SOPS | Vérification des métadonnées de deux copies indépendantes (USB + cible hors support commun), test synthétique et restauration isolée | **Partiel** : une récupération SOPS avec identité USB a déjà été signalée PASS ; cela ne démontre pas deux copies indépendantes ni un PRA complet |
 | P0 | 4 — escrow USB/NFS | Sonde client readonly + contrats de chemin NFS ; permissions strictes et cas d'échec NFS non monté | **À importer** ; exports/ACL côté TrueNAS restent Compose |
-| P1 | 5 — protocole matériel | Inventaire FIDO2, OpenPGP, OTP2, PIV et 0x82 ; NO-GO par défaut | **À importer après tests hermétiques**, aucune écriture matérielle |
+| P1 | 5 — protocole matériel | Inventaire FIDO2, OpenPGP, OTP2, PIV et 0x82 ; NO-GO par défaut | **Partiel** : SSH FIDO2 fait ([runbook](runbooks/ssh-fido2.md), sonde `ssh-fido2-readonly` + tests) ; OpenPGP/OTP/PIV à importer, aucune autre écriture matérielle |
 | P1 | 6 — compatibilité | Parité du `just --list`, chemins/imports, statuts/codes sortie 0/2 et wrappers Compose | **À prouver sur Workstation** |
 | P1 | 7 — cutover GitOps | Marquer les anciens scripts Compose comme dépréciés, transférer les liens de runbook, puis supprimer seulement les doublons sans consommateurs | **Bloqué par parité et revue** |
 | P2 | 8 — intégration dans Compose | Évaluer `security/nabla-yubikey` piné, sans submodule automatique ni données runtime | **Différé** jusqu'à release/commit testé |
@@ -29,6 +29,7 @@
 # Dans le dépôt dédié, branche PR #1 :
 just test
 just dependencies-readonly
+just ssh-fido2-readonly
 
 # Dans nabla-compose actualisé, comparer l'inventaire
 # sans déplacer ou nettoyer de fichiers :

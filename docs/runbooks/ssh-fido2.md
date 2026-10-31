@@ -1,6 +1,6 @@
 # Runbook — clé SSH FIDO2 résidente (ed25519-sk)
 
-> **Attesté le 31/10/2026** sur Workstation (YubiKey 5 NFC, firmware 5.4.3, OpenSSH 10.2, GNOME/Wayland) : génération, signature directe et signature via `gcr-ssh-agent` PASS. Reconnexion de session et déploiement `authorized_keys`/GitHub **non attestés**.
+> **Attesté le 31/10/2026** sur Workstation (YubiKey 5 NFC, firmware 5.4.3, OpenSSH 10.2, GNOME/Wayland) : génération, signature directe et via `gcr-ssh-agent`, push GitHub PASS. Reconnexion de session et bascule sur `id_ed25519` YubiKey débranchée **non attestées**.
 
 Opération **modificatrice** : elle ajoute un identifiant résident sur la carte. À lancer soi-même, de façon interactive ; le PIN FIDO2 ne passe jamais par un script ni un agent IA.
 
@@ -35,25 +35,42 @@ ssh-keygen -t ed25519-sk -O resident -O verify-required \
 
 Conséquence : **PIN + toucher à chaque signature** (connexion `ssh`, `git push` SSH, commit signé SSH). Pour réduire la fréquence : `ControlMaster auto` / `ControlPersist` dans `~/.ssh/config` (une authentification par connexion maîtresse), ou régénérer **sans** `verify-required` (toucher seul, le PIN n'est plus demandé : arbitrage de sécurité à décider explicitement).
 
+## Répartition des clés (31/10)
+
+| Usage | Clé | Pourquoi |
+| --- | --- | --- |
+| `git push` GitHub depuis Workstation | `id_ed25519_sk` (YubiKey) | Clé publique enregistrée sur GitHub, PIN + toucher |
+| truenas, pfsense | `id_ed25519` | Ces hôtes ne connaissent pas la YubiKey : ils refusent `id_ed25519_sk` sans demander de PIN, puis acceptent la clé fichier |
+| Signature des commits | Clé OpenPGP (`commit.gpgsign = true`) | Commits « Verified » sur GitHub, indépendants de la clé SSH |
+
+`ForwardAgent no` partout : un root distant pourrait utiliser l'agent transféré, y compris la clé fichier sans aucune confirmation. TrueNAS utilise sa propre clé pour ses accès sortants.
+
 ## `~/.ssh/config` (attesté avec GitHub le 31/10)
 
-ssh retient la **première** valeur lue : un `Host *` placé avant fait proposer `id_ed25519` d'abord, la YubiKey n'est alors jamais sollicitée. Mettre le bloc avant `Host *` :
+ssh retient la **première** valeur lue (`IdentityFile` s'accumule dans l'ordre de lecture). Organisation retenue :
+
+- `~/.ssh/config` : inventaire privé des hôtes (IP, ports, comptes), jamais versionné, se termine par `Match all` + `Include ~/.config/ssh/common.conf` pour que ses blocs gagnent.
+- `~/.config/ssh/common.conf` : défauts publics, versionnables dans les dotfiles.
 
 ```sshconfig
 Host github.com
   User git
   PreferredAuthentications publickey
-  IdentityFile ~/.ssh/id_ed25519_sk
-  IdentityFile ~/.ssh/id_ed25519
-  ControlPersist 1h
+  ControlPersist 1h          # un PIN par heure d'activité git
 
 Host *
+  IdentitiesOnly yes
+  ForwardAgent no
   ControlMaster auto
   ControlPath ~/.ssh/cm-%r@%h:%p
   ControlPersist 10m
+  IdentityFile ~/.ssh/id_ed25519_sk   # YubiKey d'abord
+  IdentityFile ~/.ssh/id_ed25519      # secours, et clé des serveurs
 ```
 
-Contrôle : `ssh -G github.com | grep -E '^(identityfile|controlpersist) '`, puis `ssh -T github.com` (PIN demandé) et `ssh -O check github.com` (connexion maîtresse active, pas de nouveau PIN).
+Contrôle sans réseau ni PIN : `just ssh-fido2-readonly` (`GO` attendu). Puis `ssh -T github.com` (PIN demandé) et `ssh -O check github.com` (connexion maîtresse active, pas de nouveau PIN).
+
+La sonde lit `ssh -G`, l'environnement systemd utilisateur (seulement `SSH_ASKPASS` et `WAYLAND_DISPLAY`) et `git config --global` ; elle n'affiche ni chemin, ni clé, ni empreinte.
 
 ## Piège GNOME/Wayland : « agent refused operation »
 
