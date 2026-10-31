@@ -56,7 +56,8 @@ ssh retient la **première** valeur lue (`IdentityFile` s'accumule dans l'ordre 
 Host github.com
   User git
   PreferredAuthentications publickey
-  ControlPersist 1h          # un PIN par heure d'activité git
+  ControlPersist 8h          # un PIN par journée de travail
+  ServerAliveInterval 60     # garde la connexion maîtresse à travers NAT/WARP
 
 Host *
   IdentitiesOnly yes
@@ -67,6 +68,8 @@ Host *
   IdentityFile ~/.ssh/id_ed25519_sk   # YubiKey d'abord
   IdentityFile ~/.ssh/id_ed25519      # secours, et clé des serveurs
 ```
+
+**Arbitrage `ControlPersist 8h` (choisi le 31/10) :** tant que la connexion maîtresse est ouverte, tout processus du compte peut pousser sur GitHub sans PIN ni toucher. La fermer avant une absence : `ssh -O exit github.com`.
 
 Contrôle sans réseau ni PIN : `just ssh-fido2-readonly` (`GO` attendu). Puis `ssh -T github.com` (PIN demandé) et `ssh -O check github.com` (connexion maîtresse active, pas de nouveau PIN).
 
