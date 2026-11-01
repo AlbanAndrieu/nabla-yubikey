@@ -25,7 +25,9 @@
 - [x] **Prérequis système** : contrôles des binaires PostgreSQL regroupés dans `trusted_executable`, émission JSON partagée, sans commande d'administration.
 - [x] **Contrats hermétiques** : scénarios de rejet ajoutés aux tests ; aucune exécution des tests ni diagnostic matériel demandée dans cette itération.
 - [ ] **Preuve d'exécution sur le HEAD** : `just test` puis `just dependencies-readonly`, `just ssh-fido2-readonly`, `just applets-readonly`, `just keepassxc-readonly` exécutés localement sur la workstation (une YubiKey à la fois). **Non exécuté par cet agent** en l'absence de checkout/réseau Git dans son environnement.
-- [ ] **Parité Compose** : comparer les structures JSON et sémantiques `GO/NO-GO`, documenter l'impact des changements fail-closed et maintenir les anciens wrappers jusqu'à validation.
+- [x] **Comparateur statique Compose** : `scripts/ops/compare-compose-contracts.py` (AST uniquement), champs `snapshot()` de `inspect-yubikey-dependencies-readonly.py`, état `SCHEMA_MATCH/NO-GO`, `runtime_parity_verified=false`, aucun appel Git/sonde ; recette `just compose-contract` et tests hermétiques ajoutés.
+- [x] **Sortie JSON partagée** : les quatre sondes conservent leur `mode` lors d'une exception ; erreur expurgée, `status=NO-GO`, `blocking=[PROBE_EXCEPTION]` sans chemin privé ni traceback.
+- [ ] **Parité Compose complète** : comparer les **valeurs**, les états et les codes de sortie 0/2 de manière hermétique puis sur la workstation ; les structures AST ne remplacent pas ces preuves. Conserver les wrappers Compose jusqu'à validation, sans suppression anticipée.
 
 ## File de travail priorisée
 
