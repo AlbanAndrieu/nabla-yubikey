@@ -65,7 +65,7 @@ def device_role(serials: str | None, roles: str) -> str:
     The mapping stays in the operator's environment; the serial is never returned.
     """
     lines = [] if serials is None else [line.strip() for line in serials.splitlines() if line.strip()]
-    if len(lines) != 1 or not lines[0].isdigit():
+    if len(lines) != 1 or not lines[0].isascii() or not lines[0].isdecimal():
         return "UNKNOWN"
     # Only public role labels may enter machine-readable reports. Never echo
     # arbitrary environment text (it could be an operator secret).
