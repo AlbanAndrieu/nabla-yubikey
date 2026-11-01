@@ -116,6 +116,20 @@ class ParsingContracts(unittest.TestCase):
         self.assertIn("PROBE_EXCEPTION", out.getvalue())
         self.assertNotIn("unexpected", out.getvalue())
 
+    def test_exception_retains_probe_mode_and_nonserializable_values_fail_closed(self):
+        def failed():
+            raise OSError("/private/operator/ssh/id_ed25519")
+        for snapshot in (failed, lambda: {"not_json": object()}):
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = probe_common.main_json(snapshot, [], mode="KEEPASSXC_READONLY")
+            self.assertEqual(code, 0)
+            report = __import__("json").loads(out.getvalue())
+            self.assertEqual(report["status"], "NO-GO")
+            self.assertEqual(report["mode"], "KEEPASSXC_READONLY")
+            self.assertEqual(report["blocking"], ["PROBE_EXCEPTION"])
+            self.assertNotIn("/private/operator", out.getvalue())
+
     def test_main_json_exit_codes(self):
         out = io.StringIO()
         with redirect_stdout(out):
