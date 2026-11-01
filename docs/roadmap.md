@@ -27,7 +27,9 @@
 - [ ] **Preuve d'exécution sur le HEAD** : `just test` puis `just dependencies-readonly`, `just ssh-fido2-readonly`, `just applets-readonly`, `just keepassxc-readonly` exécutés localement sur la workstation (une YubiKey à la fois). **Non exécuté par cet agent** en l'absence de checkout/réseau Git dans son environnement.
 - [x] **Comparateur statique Compose** : `scripts/ops/compare-compose-contracts.py` (AST uniquement), champs `snapshot()` de `inspect-yubikey-dependencies-readonly.py`, état `SCHEMA_MATCH/NO-GO`, `runtime_parity_verified=false`, aucun appel Git/sonde ; recette `just compose-contract` et tests hermétiques ajoutés.
 - [x] **Sortie JSON partagée** : les quatre sondes conservent leur `mode` lors d'une exception ; erreur expurgée, `status=NO-GO`, `blocking=[PROBE_EXCEPTION]` sans chemin privé ni traceback.
-- [ ] **Parité Compose complète** : comparer les **valeurs**, les états et les codes de sortie 0/2 de manière hermétique puis sur la workstation ; les structures AST ne remplacent pas ces preuves. Conserver les wrappers Compose jusqu'à validation, sans suppression anticipée.
+- [x] **Parité des valeurs simulées préparée** : `compare-probe-fixtures.py` compare les champs et les codes de sortie enregistrés sur scénarios synthétiques avec différences expurgées ; recette `just fixture-contract` (deux fichiers explicitement fournis).
+- [x] **Comparaison hermétique Compose ↔ YubiKey préparée** : `test_compose_runtime_parity.py` couvre les valeurs de snapshots, `status=NO-GO`, code 0 du rapport JSON et refus des arguments code 2 ; `just parity-tests` exige un checkout Compose local. Aucune commande d'observation effective durant les scénarios mockés.
+- [ ] **Preuve d'exécution et parité matérielle** : les deux comparateurs et la suite de tests ne sont pas exécutés dans cette itération. `FIXTURES_MATCH` / `SCHEMA_MATCH` ne prouvent ni la parité runtime ni les comportements matériels ; les anciennes recettes Compose restent maintenues.
 
 ## File de travail priorisée
 
