@@ -74,7 +74,7 @@ def number(pattern: str, raw: str) -> int | None:
 
 
 def parse_device(raw: str) -> dict | None:
-    firmware = re.search(r"^Firmware version: ([0-9]+(?:\\.[0-9]+){2})$", raw, re.MULTILINE)
+    firmware = re.search(r"^Firmware version: ([0-9]+(?:\.[0-9]+){2})$", raw, re.MULTILINE)
     apps = {}
     in_table = False
     for line in raw.splitlines():
@@ -92,10 +92,10 @@ def parse_device(raw: str) -> dict | None:
 
 def parse_fido(raw: str) -> dict | None:
     """Do not treat unknown/missing PIN metadata as PIN configured."""
-    remaining = number(r"^PIN:\s+(\d+) attempt\\(s\\) remaining\\s*$", raw)
+    remaining = number(r"^PIN:\s+(\d+) attempt\(s\) remaining\s*$", raw)
     if remaining is not None:
         return {"pin_set": True, "pin_attempts": remaining}
-    if re.search(r"^PIN:\s+Not set\\s*$", raw, re.MULTILINE):
+    if re.search(r"^PIN:\s+Not set\s*$", raw, re.MULTILINE):
         return {"pin_set": False, "pin_attempts": None}
     return None
 
@@ -103,7 +103,7 @@ def parse_fido(raw: str) -> dict | None:
 def parse_openpgp(raw: str) -> dict | None:
     pin = number(r"^PIN tries remaining:\s+(\d+)", raw)
     admin = number(r"^Admin PIN tries remaining:\s+(\d+)", raw)
-    kdf = re.search(r"^KDF enabled:\s+(True|False)\\s*$", raw, re.MULTILINE)
+    kdf = re.search(r"^KDF enabled:\s+(True|False)\s*$", raw, re.MULTILINE)
     if pin is None or admin is None or kdf is None:
         return None
     return {"pin_tries": pin, "admin_pin_tries": admin,
