@@ -10,7 +10,7 @@
 - Les prérequis OS sont déjà traités par `ansible-workstation` ; ne pas réintroduire de tâches PAM globales.
 - **31/10** : clé SSH FIDO2 résidente générée sur décision explicite et signature via `gcr-ssh-agent` PASS ; procédure et piège askpass/Wayland dans le [runbook SSH FIDO2](runbooks/ssh-fido2.md). Clé publique ajoutée sur GitHub (push PASS, PIN demandé) ; commits signés OpenPGP « Verified ». truenas/pfsense restent sur `id_ed25519`, sans transfert d'agent. Sonde `just ssh-fido2-readonly` : **GO**.
 - **31/10, déverrouillage Vaultwarden** : `bw unlock` exige encore le mot de passe maître. L'OTP YubiKey est déjà actif dans Vaultwarden, mais il ne sert qu'à `bw login --method 3`, pas à `unlock`. Constats en lecture seule : la YubiKey testée a **0/3 emplacement OpenPGP rempli** et la clé de `pass` (`~/.password-store/.gpg-id`) est **logicielle**. `gpg --card-status` répondait `Card error` jusqu'à `gpgconf --kill scdaemon`.
-- **31/10, KeePassXC** : fichier clé sorti de Dropbox (local 600), coffre en Argon2id 256 Mio avec phrase de passe, ouverture **PASS** avec la YubiKey secondaire ; [runbook](runbooks/keepassxc.md), sonde `just keepassxc-readonly` **GO**. La clé SSH `ssh:nabla` et 7 identifiants FIDO2 (GitHub, Microsoft, AWS ×2, Bitwarden, Stripe, OpenAI) ne sont **que sur la secondaire**. Rapport de santé du coffre : 148/176 mots de passe faibles, 108 réutilisés (jusqu'à 29 fois).
+- **31/10, KeePassXC** : fichier clé sorti de Dropbox (local 600), coffre en Argon2id 256 Mio avec phrase de passe, ouverture **PASS** avec les deux YubiKeys ; [runbook](runbooks/keepassxc.md), sonde `just keepassxc-readonly` **GO**. La clé SSH `ssh:nabla` et 7 identifiants FIDO2 (GitHub, Microsoft, AWS ×2, Bitwarden, Stripe, OpenAI) ne sont **que sur la secondaire**. Rapport de santé du coffre : 148/176 mots de passe faibles, 108 réutilisés (jusqu'à 29 fois).
 
 ## Refactoring lecture seule — novembre 2026
 
@@ -18,6 +18,12 @@
 - [x] **KeePassXC** : parsing borné du seul en-tête externe KDBX, refus des champs malformés, des fichiers spéciaux et des algorithmes inconnus ; sélection locale du dernier fichier tolérante aux suppressions concurrentes.
 - [x] **SSH FIDO2** : exécution de sondes limitée aux commandes autorisées, traitement unifié des timeouts/sorties, état `ForwardAgent` ambigu classé `UNKNOWN`.
 - [x] **Justfile** : `just test` concis, `just test-verbose` pour investigations.
+- [x] **Helpers partagés** : `probe_common.py` refuse les sorties OTP supplémentaires/contradictoires et les rôles libres ou ambigus ; limites d'exécution des commandes et contenu d'erreur Git stricts.
+- [x] **Applets** : un état USB/NFC inconnu ou un compteur PIN/KDF répété ne peut plus produire un faux `GO`.
+- [x] **SSH** : sortie d'erreur Git non vide et métadonnées d'agent manquantes/dupliquées deviennent `UNKNOWN` bloquant.
+- [x] **KeePassXC** : détection des liens symboliques de fichier clé dans le cloud, `cloud_keyfile_scan` triétat, rejet des dossiers et des champs cryptographiques KDBX dupliqués.
+- [x] **Prérequis système** : contrôles des binaires PostgreSQL regroupés dans `trusted_executable`, émission JSON partagée, sans commande d'administration.
+- [x] **Contrats hermétiques** : scénarios de rejet ajoutés aux tests ; aucune exécution des tests ni diagnostic matériel demandée dans cette itération.
 - [ ] **Preuve d'exécution sur le HEAD** : `just test` puis `just dependencies-readonly`, `just ssh-fido2-readonly`, `just applets-readonly`, `just keepassxc-readonly` exécutés localement sur la workstation (une YubiKey à la fois). **Non exécuté par cet agent** en l'absence de checkout/réseau Git dans son environnement.
 - [ ] **Parité Compose** : comparer les structures JSON et sémantiques `GO/NO-GO`, documenter l'impact des changements fail-closed et maintenir les anciens wrappers jusqu'à validation.
 
