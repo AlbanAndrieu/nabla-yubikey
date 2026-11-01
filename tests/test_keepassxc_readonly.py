@@ -120,6 +120,34 @@ class KeepassxcContracts(unittest.TestCase):
         report = self.report(Vault(), ykman_otp="Device busy\n")
         self.assertIn("YUBIKEY_SLOT2_UNKNOWN", report["blocking"])
 
+    def test_corrupt_kdbx_metadata_fails_closed(self):
+        original = kdbx4(ARGON2ID, 256)
+        for raw in (original[:20], original.replace(b"\r\n\r\n", b"ABCD", 1),
+                    original.replace(ARGON2ID, b"\xff" * 16, 1)[:45]):
+            self.assertIsNone(module.parse_header(raw))
+        params = (struct.pack("<H", 0x100) + entry(0x42, "$UUID", ARGON2ID)
+                  + entry(0x42, "$UUID", ARGON2ID) + b"\x00")
+        self.assertIsNone(module.variant_dict(params))
+        self.assertIsNone(module.variant_dict(b"\x00\x01\x05\xff"))
+
+    def test_unknown_kdf_or_cipher_is_blocking_not_a_success(self):
+        unknown_kdf = kdbx4(b"\xff" * 16, 256)
+        report = self.report(Vault(header=unknown_kdf))
+        self.assertIn("KDF_UNREADABLE", report["blocking"])
+        self.assertEqual(report["status"], "NO-GO")
+        unknown_cipher = kdbx4(ARGON2ID, 256).replace(AES, b"\xee" * 16, 1)
+        report = self.report(Vault(header=unknown_cipher))
+        self.assertIn("CIPHER_UNREADABLE", report["blocking"])
+        self.assertEqual(report["status"], "NO-GO")
+
+    def test_newest_ignores_symlinks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            real = root / "real.kdbx"
+            real.write_bytes(kdbx4())
+            (root / "link.kdbx").symlink_to(real)
+            self.assertEqual(module.newest(root, "*.kdbx"), real)
+
     def test_ssh_agent_disabled_is_advice(self):
         report = self.report(Vault(ini="[SSHAgent]\nEnabled=false\n"))
         self.assertIn("KEEPASSXC_SSH_AGENT_DISABLED", report["advice"])
