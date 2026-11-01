@@ -20,11 +20,14 @@ COMMANDS = {
     "piv": ["piv", "info"],
     "otp": ["otp", "info"],
 }
+# Explicit allowlist: diagnostics must not accidentally grow mutating subcommands.
+READ_ONLY_COMMANDS = {("list",), ("list", "--serials"),
+                      *(tuple(args) for args in COMMANDS.values())}
 
 
 def ykman(args: list[str]) -> str | None:
-    """Run one read-only ykman command; None when its output cannot be trusted."""
-    if not shutil.which("ykman"):
+    """Run one allowlisted inspection command, without PIN, prompts or stderr."""
+    if tuple(args) not in READ_ONLY_COMMANDS or not shutil.which("ykman"):
         return None
     try:
         done = subprocess.run(["ykman", *args], stdin=subprocess.DEVNULL,
@@ -53,11 +56,12 @@ def device_role(serials: str | None, roles: str) -> str:
 
 
 def parse_otp(raw: str) -> dict | None:
-    """None unless both slots are reported: a busy device must not read as an empty slot."""
-    states = dict(re.findall(r"^Slot ([12]): (programmed|empty)$", raw, re.MULTILINE))
-    if set(states) != {"1", "2"}:
+    """Require exactly one authoritative state per slot (reject duplicates)."""
+    rows = re.findall(r"^Slot ([12]): (programmed|empty)$", raw, re.MULTILINE)
+    if len(rows) != 2 or {slot for slot, _ in rows} != {"1", "2"}:
         return None
-    return {f"slot{n}": states[n] == "programmed" for n in ("1", "2")}
+    return {f"slot{n}": state == "programmed" for n in ("1", "2")
+            for slot, state in rows if slot == n}
 
 
 def device_count(raw: str | None) -> int | None:
@@ -69,8 +73,8 @@ def number(pattern: str, raw: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def parse_device(raw: str) -> dict:
-    firmware = re.search(r"^Firmware version: ([0-9.]+)$", raw, re.MULTILINE)
+def parse_device(raw: str) -> dict | None:
+    firmware = re.search(r"^Firmware version: ([0-9]+(?:\\.[0-9]+){2})$", raw, re.MULTILINE)
     apps = {}
     in_table = False
     for line in raw.splitlines():
@@ -80,23 +84,38 @@ def parse_device(raw: str) -> dict:
         cells = [cell.strip() for cell in line.split("\t")]
         if in_table and len(cells) == 3:
             apps[cells[0]] = {"usb": cells[1] == "Enabled", "nfc": cells[2] == "Enabled"}
-    return {"firmware": firmware.group(1) if firmware else None, "applications": apps}
+    # A truncated ykman response must not be treated as a healthy applet set.
+    if firmware is None or not apps:
+        return None
+    return {"firmware": firmware.group(1), "applications": apps}
 
 
-def parse_fido(raw: str) -> dict:
-    return {"pin_set": "Not set" not in raw,
-            "pin_attempts": number(r"^PIN:\s+(\d+) attempt", raw)}
+def parse_fido(raw: str) -> dict | None:
+    """Do not treat unknown/missing PIN metadata as PIN configured."""
+    remaining = number(r"^PIN:\s+(\d+) attempt\\(s\\) remaining\\s*$", raw)
+    if remaining is not None:
+        return {"pin_set": True, "pin_attempts": remaining}
+    if re.search(r"^PIN:\s+Not set\\s*$", raw, re.MULTILINE):
+        return {"pin_set": False, "pin_attempts": None}
+    return None
 
 
-def parse_openpgp(raw: str) -> dict:
-    return {"pin_tries": number(r"^PIN tries remaining:\s+(\d+)", raw),
-            "admin_pin_tries": number(r"^Admin PIN tries remaining:\s+(\d+)", raw),
-            "kdf_enabled": bool(re.search(r"^KDF enabled:\s+True", raw, re.MULTILINE))}
+def parse_openpgp(raw: str) -> dict | None:
+    pin = number(r"^PIN tries remaining:\s+(\d+)", raw)
+    admin = number(r"^Admin PIN tries remaining:\s+(\d+)", raw)
+    kdf = re.search(r"^KDF enabled:\s+(True|False)\\s*$", raw, re.MULTILINE)
+    if pin is None or admin is None or kdf is None:
+        return None
+    return {"pin_tries": pin, "admin_pin_tries": admin,
+            "kdf_enabled": kdf.group(1) == "True"}
 
 
-def parse_piv(raw: str) -> dict:
-    return {"pin_tries": number(r"^PIN tries remaining:\s+(\d+)", raw),
-            "puk_tries": number(r"^PUK tries remaining:\s+(\d+)", raw),
+def parse_piv(raw: str) -> dict | None:
+    pin = number(r"^PIN tries remaining:\s+(\d+)", raw)
+    puk = number(r"^PUK tries remaining:\s+(\d+)", raw)
+    if pin is None or puk is None:
+        return None
+    return {"pin_tries": pin, "puk_tries": puk,
             "default_credentials": bool(re.search(r"default (PIN|PUK|Management key)", raw, re.IGNORECASE)),
             "slots": sorted(set(re.findall(r"^Slot ([0-9A-F]{2})\b", raw, re.MULTILINE)))}
 
