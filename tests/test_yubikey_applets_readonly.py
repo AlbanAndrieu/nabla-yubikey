@@ -119,6 +119,31 @@ class AppletContracts(unittest.TestCase):
             self.assertEqual(report["status"], "NO-GO", finding)
             self.assertIn(finding, report["blocking"])
 
+    def test_truncated_fido_piv_openpgp_or_device_never_reports_go(self):
+        for field, raw in (("fido", "PIN: unavailable\\n"),
+                           ("piv", "PIN tries remaining: 3/3\\n"),
+                           ("openpgp", "Admin PIN tries remaining: 3\\n"),
+                           ("info", "Firmware version: 5.4.3\\n")):
+            report = snapshot_with(**{field: raw})
+            expected = {"fido": "FIDO_UNREADABLE", "piv": "PIV_UNREADABLE",
+                        "openpgp": "OPENPGP_UNREADABLE", "info": "DEVICE_UNREADABLE"}[field]
+            self.assertEqual(report["status"], "NO-GO", field)
+            self.assertIn(expected, report["blocking"], field)
+
+    def test_otp_duplicate_or_conflicting_rows_are_unknown(self):
+        for raw in ("Slot 1: programmed\\nSlot 1: empty\\nSlot 2: programmed\\n",
+                    "Slot 1: programmed\\nSlot 1: programmed\\nSlot 2: programmed\\n"):
+            self.assertIsNone(module.parse_otp(raw))
+            self.assertIn("OTP_UNREADABLE", snapshot_with(otp=raw)["blocking"])
+
+    def test_refuse_mutating_ykman_commands_without_spawning_a_process(self):
+        with patch.object(module.shutil, "which", return_value="/usr/bin/ykman"), \\
+             patch.object(module.subprocess, "run") as runner:
+            for args in (["piv", "reset"], ["fido", "reset"],
+                         ["otp", "chalresp", "2"], ["config", "usb", "--disable", "OTP"]):
+                self.assertIsNone(module.ykman(args))
+            runner.assert_not_called()
+
     def test_missing_ykman_fails_closed(self):
         with patch.object(module.shutil, "which", return_value=None), \
              patch.object(module.subprocess, "run") as run:
