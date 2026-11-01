@@ -28,7 +28,8 @@ def read_metadata(command: list[str]) -> str | None:
     if not permitted:
         return None
     # git config --get returns 1 for an unset key; other failures fail closed.
-    return run_bounded(command, timeout=5, ok_codes=(0, 1) if command[0] == "git" else (0,))
+    return run_bounded(command, timeout=5, ok_codes=(0, 1) if command[0] == "git" else (0,),
+                       require_empty_on_error=command[0] == "git")
 
 
 def ssh_config(host: str) -> dict[str, list[str]] | None:
@@ -85,9 +86,11 @@ def agent_environment() -> dict[str, str]:
     if result is None:
         return {}
     wanted = ("SSH_ASKPASS", "WAYLAND_DISPLAY")
-    return {key: value for key, sep, value in
-            (line.partition("=") for line in result.splitlines())
-            if sep and key in wanted and len(value) <= 4096}
+    pairs = [line.partition("=") for line in result.splitlines()]
+    # Multiple definitions are ambiguous: don't let the last one silently win.
+    return {key: value for key, sep, value in pairs
+            if sep and key in wanted and len(value) <= 4096
+            and sum(1 for other, _, _ in pairs if other == key) == 1}
 
 
 def askpass_state(env: dict[str, str]) -> str:
