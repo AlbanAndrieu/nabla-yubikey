@@ -33,3 +33,40 @@ Ne pas retirer l'ancien code Compose tant que les recettes
 locales, statuts, exit codes et rapports ne sont pas équivalents.
 Le submodule Git dans Compose sera ajouté plus tard, sous un chemin
 ne chevauchant pas une application déjà suivie.
+
+## Comparaison des contrats avec Compose (analyse statique)
+
+Le dépôt contient désormais `scripts/ops/compare-compose-contracts.py`, un
+comparateur Python **sans import ni exécution** des scripts inspectés. Il lit
+uniquement les fonctions `snapshot()` de
+`scripts/workstation/inspect-yubikey-dependencies-readonly.py` dans les deux
+checkouts, puis compare **les noms des champs littéraux du JSON**.
+
+Depuis `nabla-yubikey` avec les deux checkouts côte à côte :
+
+```bash
+just compose-contract
+# Si les checkouts ne sont pas frères :
+COMPOSE_ROOT=~/w/nabla-compose just compose-contract
+```
+
+La recette applique `--assert-field-parity` : code de sortie 0 uniquement si
+les ensembles de champs se correspondent et que les champs de base requis
+existent ; code 2 si la source manque, est illisible ou si son schéma dérive.
+Le rapport JSON comprend `compose_fields`, `yubikey_fields`,
+`missing_fields`, `extra_fields` et `source_identical`.
+Les chemins locaux absolus ne sont jamais imprimés.
+
+**Limite impérative :** `status=SCHEMA_MATCH` atteste uniquement la forme
+statique des clés, **pas** la parité des valeurs, des commandes invoquées, des
+codes de sortie réels, de l'accès matériel ou des scénarios de récupération.
+`runtime_parity_verified=false` est constant et aucun wrapper Compose ne
+doit être supprimé sur cette seule base.
+
+Les quatre scripts de lecture seule partagent `main_json`, notamment le
+retour JSON `NO-GO` redigé en cas d'exception avec conservation du champ
+`mode`. Les scripts matériels, l'accès aux secrets et les tests réels restent
+hors de ce comparateur.
+
+**État de cette PR :** code et tests écrits ; aucun test ni diagnostic lancé
+pendant la présente itération, pas de CI GitHub, pas de migration définitive.
