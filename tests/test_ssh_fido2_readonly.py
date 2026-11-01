@@ -170,6 +170,24 @@ class SshFido2Contracts(unittest.TestCase):
                  returncode=2, stdout="")):
             self.assertIsNone(module.git_config("gpg.format"))
 
+    def test_nonempty_git_failure_cannot_fake_signed_commits(self):
+        with patch("shutil.which", return_value="/usr/bin/git"), \
+             patch("subprocess.run", return_value=SimpleNamespace(
+                 returncode=1, stdout="true\n")):
+            self.assertIsNone(module.git_config("commit.gpgsign"))
+            self.assertEqual(module.commit_signing_state(), "UNKNOWN")
+
+    def test_unreadable_or_duplicate_agent_environment_is_blocking(self):
+        with patch("shutil.which", return_value=None):
+            self.assertEqual(module.agent_environment(), {"_probe_error": "UNREADABLE"})
+        self.assertEqual(module.askpass_state({"_probe_error": "DUPLICATE"}), "UNKNOWN")
+        for env in (AGENT_ENV + "SSH_ASKPASS=/usr/bin/ssh-askpass\n",
+                    AGENT_ENV + "WAYLAND_DISPLAY=wayland-1\n"):
+            report = snapshot_with(systemctl=env)
+            self.assertEqual(report["agent_askpass"], "UNKNOWN")
+            self.assertIn("AGENT_UNKNOWN", report["blocking"])
+            self.assertEqual(report["status"], "NO-GO")
+
     def test_arguments_rejected(self):
         with patch("sys.stderr", new=io.StringIO()):
             self.assertEqual(module.main(["--fix"]), 2)
