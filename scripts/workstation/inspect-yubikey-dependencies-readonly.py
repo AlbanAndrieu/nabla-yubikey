@@ -6,13 +6,14 @@ account names, request PINs, list credentials or initiate cryptography.
 """
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 import shutil
 import stat
 import subprocess
 import sys
+
+from probe_common import main_json
 
 TOOLS = ("pg_restore", "pg_dump", "psql", "initdb", "pg_ctl", "age", "sops", "gpg", "ssh-add")
 
@@ -207,12 +208,7 @@ def snapshot() -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = sys.argv[1:] if argv is None else argv
-    if args:
-        print("No arguments supported", file=sys.stderr)
-        return 2
-    print(json.dumps(snapshot(), sort_keys=True))
-    return 0
+    return main_json(snapshot, argv)
 
 
 if __name__ == "__main__":
