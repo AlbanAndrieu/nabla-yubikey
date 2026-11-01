@@ -102,7 +102,7 @@ def compare(compose_root: Path, yubikey_root: Path = ROOT) -> dict:
         blocking=(["REQUIRED_FIELD_MISSING"] if required_missing else []) +
                  (["SNAPSHOT_FIELDS_DIFFER"] if missing or extra else []),
         fields_match=fields_match,
-        missing_fields=missing + required_missing if required_missing else missing,
+        missing_fields=sorted(set(missing) | set(required_missing)),
         extra_fields=extra,
         source_identical=hashlib.sha256(old_source.encode()).digest() ==
                          hashlib.sha256(new_source.encode()).digest(),
