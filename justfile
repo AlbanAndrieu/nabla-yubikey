@@ -4,6 +4,11 @@ default:
 
 test:
     python3 -m py_compile scripts/workstation/*.py tests/*.py
+    python3 -m unittest discover -s tests -p 'test_*.py' -q
+
+# Verbose output only when investigating a failing case.
+test-verbose:
+    python3 -m py_compile scripts/workstation/*.py tests/*.py
     python3 -m unittest discover -s tests -p 'test_*.py' -v
 
 dependencies-readonly:
