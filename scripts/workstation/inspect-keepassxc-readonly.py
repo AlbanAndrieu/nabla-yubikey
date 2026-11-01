@@ -165,14 +165,17 @@ def cloud_keyfile_state() -> str:
     for cloud in CLOUD_DIRS:
         try:
             metadata = cloud.lstat()
-            if not stat.S_ISDIR(metadata.st_mode):
-                return "UNKNOWN"
-            for candidate in cloud.glob("*.key"):
-                # A symlink may still expose a local key through the cloud folder.
-                candidate.lstat()
-                return "PRESENT"
         except FileNotFoundError:
             continue
+        except (OSError, RuntimeError, ValueError):
+            return "UNKNOWN"
+        if not stat.S_ISDIR(metadata.st_mode):
+            return "UNKNOWN"
+        try:
+            for candidate in cloud.glob("*.key"):
+                # Include dangling symlinks; never follow or open their targets.
+                candidate.lstat()
+                return "PRESENT"
         except (OSError, RuntimeError, ValueError):
             return "UNKNOWN"
     return "ABSENT"
