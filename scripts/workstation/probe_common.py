@@ -15,8 +15,14 @@ from typing import Callable
 
 
 def run_bounded(args: list[str], timeout: int = 15, ok_codes: tuple[int, ...] = (0,),
-                limit: int = 65536) -> str | None:
-    """Run a read-only command without stdin; None when it is missing, fails or prints too much."""
+                limit: int = 65536, require_empty_on_error: bool = False) -> str | None:
+    """Run bounded metadata probes, never returning stderr or raw error output.
+
+    The caller must use a fixed read-only command allowlist. No shell is involved.
+    """
+    if (not args or not all(isinstance(arg, str) and arg and "\x00" not in arg for arg in args)
+            or timeout <= 0 or limit <= 0 or not ok_codes):
+        return None
     if not shutil.which(args[0]):
         return None
     try:
@@ -24,7 +30,10 @@ def run_bounded(args: list[str], timeout: int = 15, ok_codes: tuple[int, ...] = 
                               stderr=subprocess.DEVNULL, text=True, timeout=timeout, check=False)
     except (OSError, UnicodeError, ValueError, subprocess.TimeoutExpired):
         return None
-    if done.returncode not in ok_codes or len(done.stdout) > limit or "\x00" in done.stdout:
+    if (done.returncode not in ok_codes or not isinstance(done.stdout, str)
+            or len(done.stdout) > limit or "\x00" in done.stdout):
+        return None
+    if require_empty_on_error and done.returncode != 0 and done.stdout:
         return None
     return done.stdout
 
@@ -37,10 +46,15 @@ def parse_otp(raw: str | None) -> dict | None:
     """None unless both slots are reported: a busy device must not read as an empty slot."""
     if raw is None:
         return None
-    rows = re.findall(r"^Slot ([12]): (programmed|empty)$", raw, re.MULTILINE)
-    states = dict(rows)
-    # Duplicate slot lines are ambiguous: reject rather than keep the last one.
-    if len(rows) != 2 or set(states) != {"1", "2"}:
+    lines = raw.splitlines()
+    # Reject busy-device messages and extra/contradictory rows even if both slots appear.
+    if len(lines) != 2:
+        return None
+    rows = [re.fullmatch(r"Slot ([12]): (programmed|empty)", line) for line in lines]
+    if any(row is None for row in rows):
+        return None
+    states = {row.group(1): row.group(2) for row in rows}
+    if len(states) != 2:
         return None
     return {f"slot{n}": states[n] == "programmed" for n in ("1", "2")}
 
@@ -53,11 +67,16 @@ def device_role(serials: str | None, roles: str) -> str:
     lines = [] if serials is None else [line.strip() for line in serials.splitlines() if line.strip()]
     if len(lines) != 1 or not lines[0].isdigit():
         return "UNKNOWN"
+    # Only public role labels may enter machine-readable reports. Never echo
+    # arbitrary environment text (it could be an operator secret).
+    labels = {"principale", "secondaire", "secours", "primary", "backup"}
+    matches = []
     for pair in roles.split(","):
-        last4, _, label = pair.strip().partition("=")
-        if last4 and last4 == lines[0][-4:] and label.isidentifier():
-            return label
-    return "UNLABELED"
+        last4, sep, label = pair.strip().partition("=")
+        if (sep and len(last4) == 4 and last4.isascii() and last4.isdecimal()
+                and last4 == lines[0][-4:] and label in labels):
+            matches.append(label)
+    return matches[0] if len(matches) == 1 else ("UNKNOWN" if matches else "UNLABELED")
 
 
 def yubikey_role() -> str:
