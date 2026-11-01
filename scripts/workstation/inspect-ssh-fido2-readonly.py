@@ -84,17 +84,21 @@ def agent_environment() -> dict[str, str]:
     """Read only the SSH askpass metadata, never echo the full environment."""
     result = read_metadata(["systemctl", "--user", "show-environment"])
     if result is None:
-        return {}
+        return {"_probe_error": "UNREADABLE"}
     wanted = ("SSH_ASKPASS", "WAYLAND_DISPLAY")
     pairs = [line.partition("=") for line in result.splitlines()]
-    # Multiple definitions are ambiguous: don't let the last one silently win.
-    return {key: value for key, sep, value in pairs
-            if sep and key in wanted and len(value) <= 4096
-            and sum(1 for other, _, _ in pairs if other == key) == 1}
+    selected = [(key, value) for key, sep, value in pairs if sep and key in wanted]
+    if any(len(value) > 4096 for _, value in selected):
+        return {"_probe_error": "INVALID"}
+    if len({key for key, _ in selected}) != len(selected):
+        return {"_probe_error": "DUPLICATE"}
+    return dict(selected)
 
 
 def askpass_state(env: dict[str, str]) -> str:
     """x11-ssh-askpass cannot grab the keyboard under Wayland and sends an empty PIN."""
+    if env.get("_probe_error"):
+        return "UNKNOWN"
     askpass = env.get("SSH_ASKPASS", "")
     if not env.get("WAYLAND_DISPLAY"):
         return "NOT_WAYLAND_UNVERIFIED"
@@ -132,8 +136,8 @@ def assess(report: dict) -> list[str]:
             blocking.append(f"{host.upper()}_{report['server_identity'][host]}")
         if report["server_agent_forwarding"][host] != "NOT_FORWARDED":
             blocking.append(f"{host.upper()}_{report['server_agent_forwarding'][host]}")
-    if report["agent_askpass"] == "X11_ASKPASS_UNDER_WAYLAND":
-        blocking.append("AGENT_X11_ASKPASS_UNDER_WAYLAND")
+    if report["agent_askpass"] in ("X11_ASKPASS_UNDER_WAYLAND", "UNKNOWN"):
+        blocking.append(f"AGENT_{report['agent_askpass']}")
     if report["commit_signing"] != "OPENPGP":
         blocking.append(f"COMMIT_SIGNING_{report['commit_signing']}")
     return blocking
