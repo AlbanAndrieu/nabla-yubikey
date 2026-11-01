@@ -225,8 +225,12 @@ def snapshot() -> dict:
         try:
             # Explicit paths may point to devices, FIFOs or symlinks: never open those.
             if stat.S_ISREG(db.lstat().st_mode):
-                with db.open("rb") as handle:
-                    header = parse_header(handle.read(65536))
+                # Refuse a symlink/special-file replacement between lstat and open.
+                flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+                fd = os.open(db, flags)
+                with os.fdopen(fd, "rb") as handle:
+                    if stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                        header = parse_header(handle.read(65536))
         except (OSError, ValueError):
             header = None
     report = {
