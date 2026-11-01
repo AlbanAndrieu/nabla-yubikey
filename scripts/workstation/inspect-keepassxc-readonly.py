@@ -30,61 +30,96 @@ CLOUD_DIRS = (HOME / "Dropbox",)
 
 
 def newest(directory: Path, pattern: str) -> Path | None:
+    """Choose a regular, non-symlink file; tolerate concurrent backup rotation."""
+    candidates: list[tuple[int, Path]] = []
     try:
-        files = [p for p in directory.glob(pattern) if p.is_file() and not p.is_symlink()]
+        for path in directory.glob(pattern):
+            try:
+                meta = path.lstat()
+                if stat.S_ISREG(meta.st_mode):
+                    candidates.append((meta.st_mtime_ns, path))
+            except OSError:
+                continue
     except OSError:
         return None
-    return max(files, key=lambda p: p.stat().st_mtime, default=None)
+    return max(candidates, default=(0, None))[1]
 
 
-def variant_dict(data: bytes) -> dict:
-    out, pos = {}, 2
-    while pos < len(data):
+def variant_dict(data: bytes) -> dict | None:
+    """Parse bounded KDBX variant metadata, rejecting truncated/duplicate fields."""
+    if len(data) < 3 or data[:2] != bytes((0, 1)):
+        return None
+    out: dict[str, str | int] = {}
+    pos = 2
+    for _ in range(64):
+        if pos >= len(data):
+            return None
         kind = data[pos]
         pos += 1
         if kind == 0:
-            break
-        klen = struct.unpack_from("<I", data, pos)[0]
+            return out if pos == len(data) else None
+        if pos + 4 > len(data):
+            return None
+        key_len = struct.unpack_from("<I", data, pos)[0]
         pos += 4
-        key = data[pos:pos + klen].decode("ascii", "replace")
-        pos += klen
-        vlen = struct.unpack_from("<I", data, pos)[0]
+        if key_len < 1 or key_len > 64 or pos + key_len + 4 > len(data):
+            return None
+        try:
+            key = data[pos:pos + key_len].decode("ascii")
+        except UnicodeDecodeError:
+            return None
+        pos += key_len
+        value_len = struct.unpack_from("<I", data, pos)[0]
         pos += 4
-        value = data[pos:pos + vlen]
-        pos += vlen
-        out[key] = value.hex() if kind == 0x42 else int.from_bytes(value, "little")
-    return out
+        if key in out or value_len > 4096 or pos + value_len > len(data):
+            return None
+        value = data[pos:pos + value_len]
+        pos += value_len
+        if kind == 0x42:
+            out[key] = value.hex()
+        elif kind in (0x04, 0x05) and value_len == (4 if kind == 0x04 else 8):
+            out[key] = int.from_bytes(value, "little")
+        else:
+            return None
+    return None
 
 
 def parse_header(raw: bytes) -> dict | None:
-    """Parse the unencrypted outer header; None when it is not a KDBX file."""
+    """Read only a complete KDBX outer header; never inspect encrypted records."""
+    if len(raw) < 12 or len(raw) > 65536:
+        return None
     try:
         sig1, sig2, minor, major = struct.unpack_from("<IIHH", raw, 0)
-        if (sig1, sig2) != (0x9AA2D903, 0xB54BFB67):
+        if (sig1, sig2) != (0x9AA2D903, 0xB54BFB67) or major not in (3, 4):
             return None
         info = {"version": f"{major}.{minor}"}
         size_fmt, size_len = ("<I", 4) if major >= 4 else ("<H", 2)
         pos = 12
-        while pos < len(raw):
+        while pos + 1 + size_len <= len(raw):
             field = raw[pos]
             size = struct.unpack_from(size_fmt, raw, pos + 1)[0]
-            value = raw[pos + 1 + size_len:pos + 1 + size_len + size]
-            pos += 1 + size_len + size
+            pos += 1 + size_len
+            if size > 65536 or pos + size > len(raw):
+                return None
+            value = raw[pos:pos + size]
+            pos += size
             if field == 0:
-                return info
+                return info if value == b"\r\n\r\n" else None
             if field == 2:
                 info["cipher"] = CIPHERS.get(value.hex(), "unknown")
             elif field == 6:
                 info["kdf"] = "AES-KDF"
             elif field == 11:
                 params = variant_dict(value)
+                if params is None:
+                    return None
                 info["kdf"] = KDFS.get(params.get("$UUID", ""), "unknown")
-                if "M" in params:
+                if "M" in params and isinstance(params["M"], int):
                     info["memory_mib"] = params["M"] // (1024 * 1024)
-                if "I" in params:
+                if "I" in params and isinstance(params["I"], int):
                     info["iterations"] = params["I"]
         return None
-    except (struct.error, IndexError, ValueError):
+    except (struct.error, IndexError, ValueError, TypeError):
         return None
 
 
@@ -156,6 +191,10 @@ def assess(report: dict) -> tuple[list[str], list[str]]:
     else:
         if not header["version"].startswith("4."):
             blocking.append("KDBX_BELOW_4")
+        if header.get("cipher") not in CIPHERS.values():
+            blocking.append("CIPHER_UNREADABLE")
+        if header.get("kdf") not in KDFS.values() and header.get("kdf") != "AES-KDF":
+            blocking.append("KDF_UNREADABLE")
         if header.get("kdf") != "Argon2id":
             advice.append("KDF_NOT_ARGON2ID")
         if header.get("memory_mib", 0) < 256:
@@ -184,9 +223,11 @@ def snapshot() -> dict:
     header = None
     if db is not None:
         try:
-            with db.open("rb") as handle:
-                header = parse_header(handle.read(65536))
-        except OSError:
+            # Explicit paths may point to devices, FIFOs or symlinks: never open those.
+            if stat.S_ISREG(db.lstat().st_mode):
+                with db.open("rb") as handle:
+                    header = parse_header(handle.read(65536))
+        except (OSError, ValueError):
             header = None
     report = {
         "mode": "KEEPASSXC_READONLY",
