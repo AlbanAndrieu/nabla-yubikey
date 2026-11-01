@@ -148,6 +148,27 @@ class KeepassxcContracts(unittest.TestCase):
             (root / "link.kdbx").symlink_to(real)
             self.assertEqual(module.newest(root, "*.kdbx"), real)
 
+    def test_explicit_symlink_database_is_not_opened(self):
+        vault = Vault()
+        try:
+            alias = vault.home / "alias.kdbx"
+            alias.symlink_to(vault.home / "Dropbox/vault.kdbx")
+            key = vault.home / ".local/share/keepassxc/vault.key"
+            with patch.object(module, "HOME", vault.home), \
+                 patch.object(module, "CLOUD_DIRS", (vault.home / "Dropbox",)), \
+                 patch.dict(module.os.environ, {
+                     "KEEPASSXC_DB": str(alias),
+                     "KEEPASSXC_KEYFILE": str(key),
+                 }, clear=True), \
+                 patch.object(module, "yubikey_slot2", return_value="PROGRAMMED"), \
+                 patch.object(module.shutil, "which", return_value="/usr/bin/x"):
+                report = module.snapshot()
+            self.assertIsNone(report["header"])
+            self.assertEqual(report["status"], "NO-GO")
+            self.assertIn("DATABASE_UNREADABLE", report["blocking"])
+        finally:
+            vault.close()
+
     def test_ssh_agent_disabled_is_advice(self):
         report = self.report(Vault(ini="[SSHAgent]\nEnabled=false\n"))
         self.assertIn("KEEPASSXC_SSH_AGENT_DISABLED", report["advice"])
