@@ -169,6 +169,57 @@ class KeepassxcContracts(unittest.TestCase):
         finally:
             vault.close()
 
+    def test_crypto_fields_must_be_unique_and_match_kdbx_version(self):
+        original = kdbx4(ARGON2ID, 256)
+        cipher_field = bytes([2]) + struct.pack("<I", 16) + AES
+        self.assertIsNone(module.parse_header(original[:12] + cipher_field + original[12:]))
+        legacy_kdf = bytes([6]) + struct.pack("<I", 1) + b"\x00"
+        self.assertIsNone(module.parse_header(original[:12] + legacy_kdf + original[12:]))
+
+    def test_directory_with_mode_600_is_not_an_acceptable_keyfile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp) / "not-a-key.key"
+            directory.mkdir()
+            directory.chmod(0o600)
+            self.assertEqual(module.mode(directory), "UNSAFE_FILE_TYPE")
+            link = Path(tmp) / "link.key"
+            link.symlink_to(directory)
+            self.assertEqual(module.mode(link), "UNSAFE_FILE_TYPE")
+
+    def test_cloud_symlink_keyfile_is_counted_as_exposed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cloud = Path(tmp) / "Dropbox"
+            cloud.mkdir()
+            (cloud / "linked.key").symlink_to(Path(tmp) / "private.key")
+            with patch.object(module, "CLOUD_DIRS", (cloud,)):
+                self.assertEqual(module.cloud_keyfile_state(), "PRESENT")
+        report = self.report(Vault(keyfile_dir="Dropbox"))
+        self.assertTrue(report["cloud_keyfile_present"])
+        self.assertEqual(report["cloud_keyfile_scan"], "PRESENT")
+
+    def test_cloud_scan_failure_does_not_claim_no_keyfile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cloud = Path(tmp) / "Dropbox"
+            cloud.symlink_to(Path(tmp) / "missing")
+            with patch.object(module, "CLOUD_DIRS", (cloud,)):
+                self.assertEqual(module.cloud_keyfile_state(), "UNKNOWN")
+        vault = Vault()
+        try:
+            with patch.object(module, "HOME", vault.home), \
+                 patch.object(module, "CLOUD_DIRS", (Path(tmp) / "Dropbox",)), \
+                 patch.object(module, "yubikey_slot2", return_value="PROGRAMMED"):
+                # An inaccessible/unknown cloud state blocks even if no key was seen.
+                finding, _ = module.assess({
+                    "header": module.parse_header(kdbx4(ARGON2ID, 256)),
+                    "database_mode": "600", "keyfile_mode": "600",
+                    "keyfile_location": "SEPARATE", "cloud_keyfile_present": False,
+                    "cloud_keyfile_scan": "UNKNOWN", "yubikey_slot2": "PROGRAMMED",
+                    "keepassxc_ssh_agent": "ENABLED", "ssh_file_key_on_disk": False,
+                })
+                self.assertIn("CLOUD_KEYFILE_SCAN_UNKNOWN", finding)
+        finally:
+            vault.close()
+
     def test_ssh_agent_disabled_is_advice(self):
         report = self.report(Vault(ini="[SSHAgent]\nEnabled=false\n"))
         self.assertIn("KEEPASSXC_SSH_AGENT_DISABLED", report["advice"])
