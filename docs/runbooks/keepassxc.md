@@ -32,6 +32,8 @@ Le coffre exige les **trois** éléments ; perdre l'un d'eux = coffre perdu.
 
 Le coffre (Dropbox) et ses copies (NAS) sont chiffrés : seuls, ils ne suffisent pas à l'ouvrir.
 
+**Lecture KDBX renforcée :** l'inspection n'ouvre que des fichiers réguliers (aucun lien symbolique ni périphérique) et vérifie les champs externes avec une taille bornée. Un en-tête tronqué, un format cryptographique inconnu ou des métadonnées KDF incohérentes entraînent un **NO-GO**, sans essayer de déchiffrer le coffre. Le JSON de `just keepassxc-readonly` reste contractuel ; code de sortie 0 ≠ déverrouillage validé.
+
 ## Diagnostic sans mot de passe
 
 ```bash
