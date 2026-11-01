@@ -11,6 +11,7 @@ import argparse
 import ast
 import hashlib
 import json
+import os
 from pathlib import Path
 import stat
 
@@ -24,13 +25,17 @@ def read_source(root: Path) -> str | None:
     """Read only the expected regular Python file, never following a symlink."""
     candidate = root / SCRIPT
     try:
-        info = candidate.lstat()
-        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_SOURCE_SIZE:
-            return None
-        # An explicit symlink in the final component is always rejected.
-        if candidate.is_symlink():
-            return None
-        return candidate.read_text(encoding="utf-8")
+        for directory in (root / "scripts", root / "scripts/workstation"):
+            if not stat.S_ISDIR(directory.lstat().st_mode):
+                return None
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        descriptor = os.open(candidate, flags)
+        with os.fdopen(descriptor, "rb") as handle:
+            meta = os.fstat(handle.fileno())
+            if not stat.S_ISREG(meta.st_mode) or meta.st_size > MAX_SOURCE_SIZE:
+                return None
+            raw = handle.read(MAX_SOURCE_SIZE + 1)
+        return raw.decode("utf-8") if len(raw) <= MAX_SOURCE_SIZE else None
     except (OSError, UnicodeError, ValueError):
         return None
 
