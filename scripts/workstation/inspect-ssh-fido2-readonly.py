@@ -17,23 +17,45 @@ GIT_HOST = "github.com"
 SERVER_HOSTS = ("truenas", "pfsense")
 
 
-def ssh_config(host: str) -> dict[str, list[str]] | None:
-    """Return resolved `ssh -G` options, or None when they cannot be trusted."""
-    if not shutil.which("ssh"):
+def read_metadata(command: list[str], timeout: int = 5) -> tuple[int, str] | None:
+    """Bounded, allowlisted, no-stdin commands only; never return stderr."""
+    permitted = (
+        command[:2] == ["ssh", "-G"] and len(command) == 3
+        and command[2] in (GIT_HOST, *SERVER_HOSTS)
+    ) or command == ["systemctl", "--user", "show-environment"] or (
+        command[:4] == ["git", "config", "--global", "--get"]
+        and len(command) == 5 and command[4] in ("commit.gpgsign", "gpg.format")
+    )
+    if not permitted or not shutil.which(command[0]):
         return None
     try:
-        done = subprocess.run(["ssh", "-G", host], stdin=subprocess.DEVNULL,
+        done = subprocess.run(command, stdin=subprocess.DEVNULL,
                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                              text=True, timeout=5, check=False)
+                              text=True, timeout=timeout, check=False)
     except (OSError, UnicodeError, ValueError, subprocess.TimeoutExpired):
         return None
-    if done.returncode != 0 or len(done.stdout) > 65536 or "\x00" in done.stdout:
+    if (not isinstance(done.stdout, str) or len(done.stdout) > 65536
+            or "\x00" in done.stdout):
+        return None
+    # git config --get returns 1 for an unset key; other failures fail closed.
+    allowed_codes = (0, 1) if command[0] == "git" else (0,)
+    if done.returncode not in allowed_codes:
+        return None
+    return done.returncode, done.stdout
+
+
+def ssh_config(host: str) -> dict[str, list[str]] | None:
+    """Read ssh's resolved options without network access or agent use."""
+    result = read_metadata(["ssh", "-G", host])
+    if result is None:
         return None
     options: dict[str, list[str]] = {}
-    for line in done.stdout.splitlines():
-        key, _, value = line.partition(" ")
+    for line in result[1].splitlines():
+        key, sep, value = line.partition(" ")
+        if not sep or not value or not key.isascii() or not key.isalpha():
+            return None
         options.setdefault(key.lower(), []).append(value)
-    return options
+    return options or None
 
 
 def is_sk(path: str) -> bool:
@@ -59,26 +81,26 @@ def file_key_offered(options: dict[str, list[str]] | None) -> str:
 
 
 def forward_agent(options: dict[str, list[str]] | None) -> str:
+    """Require one unambiguous resolved value; missing is not proof of no forwarding."""
     if options is None:
         return "UNKNOWN"
-    return "AGENT_FORWARDED" if options.get("forwardagent", ["no"])[0] != "no" else "NOT_FORWARDED"
+    values = options.get("forwardagent", [])
+    if values == ["no"]:
+        return "NOT_FORWARDED"
+    if values == ["yes"]:
+        return "AGENT_FORWARDED"
+    return "UNKNOWN"
 
 
 def agent_environment() -> dict[str, str]:
-    """Read only the askpass variables of the systemd user manager, which starts gcr-ssh-agent."""
-    if not shutil.which("systemctl"):
-        return {}
-    try:
-        done = subprocess.run(["systemctl", "--user", "show-environment"],
-                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                              stderr=subprocess.DEVNULL, text=True, timeout=5, check=False)
-    except (OSError, UnicodeError, ValueError, subprocess.TimeoutExpired):
-        return {}
-    if done.returncode != 0 or len(done.stdout) > 65536:
+    """Read only the SSH askpass metadata, never echo the full environment."""
+    result = read_metadata(["systemctl", "--user", "show-environment"])
+    if result is None:
         return {}
     wanted = ("SSH_ASKPASS", "WAYLAND_DISPLAY")
-    return {key: value for key, _, value in (line.partition("=") for line in done.stdout.splitlines())
-            if key in wanted}
+    return {key: value for key, sep, value in
+            (line.partition("=") for line in result[1].splitlines())
+            if sep and key in wanted and len(value) <= 4096}
 
 
 def askpass_state(env: dict[str, str]) -> str:
@@ -92,15 +114,10 @@ def askpass_state(env: dict[str, str]) -> str:
 
 
 def git_config(key: str) -> str | None:
-    if not shutil.which("git"):
+    result = read_metadata(["git", "config", "--global", "--get", key])
+    if result is None:
         return None
-    try:
-        done = subprocess.run(["git", "config", "--global", "--get", key],
-                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                              stderr=subprocess.DEVNULL, text=True, timeout=5, check=False)
-    except (OSError, UnicodeError, ValueError, subprocess.TimeoutExpired):
-        return None
-    return done.stdout.strip() if done.returncode == 0 else ""
+    return "" if result[0] == 1 else result[1].strip()
 
 
 def commit_signing_state() -> str:
