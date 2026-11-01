@@ -24,6 +24,12 @@ compose-contract:
 fixture-contract:
     python3 scripts/ops/compare-probe-fixtures.py --compose-fixtures "${COMPOSE_PROBE_FIXTURES:?COMPOSE_PROBE_FIXTURES is required}" --yubikey-fixtures "${YUBIKEY_PROBE_FIXTURES:?YUBIKEY_PROBE_FIXTURES is required}" --assert-fixture-parity
 
+# Opt-in hermetic tests against a trusted sibling Compose checkout.
+# No real probe or subprocess is executed; absent source is a hard failure.
+parity-tests:
+    test -f "${COMPOSE_ROOT:-../nabla-compose}/scripts/workstation/inspect-yubikey-dependencies-readonly.py"
+    python3 -m unittest discover -s tests -p 'test_compose_runtime_parity.py' -v
+
 dependencies-readonly:
     python3 scripts/workstation/inspect-yubikey-dependencies-readonly.py
 
