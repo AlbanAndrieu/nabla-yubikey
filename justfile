@@ -1,15 +1,20 @@
 # Nabla YubiKey: offline-first. Explicit hardware actions live elsewhere.
+set shell := ["bash", "-euo", "pipefail", "-c"]
+
+import 'compose.just'
+
 default:
     @just --list
 
+# Real serials from the operator's environment must not leak into hermetic fixtures.
 test:
     python3 -m py_compile scripts/workstation/*.py tests/*.py
-    python3 -m unittest discover -s tests -p 'test_*.py' -q
+    env -u YUBIKEY_PRIMARY_SERIAL -u YUBIKEY_BACKUP_SERIAL python3 -m unittest discover -s tests -p 'test_*.py' -q
 
 # Verbose output only when investigating a failing case.
 test-verbose:
     python3 -m py_compile scripts/workstation/*.py tests/*.py
-    python3 -m unittest discover -s tests -p 'test_*.py' -v
+    env -u YUBIKEY_PRIMARY_SERIAL -u YUBIKEY_BACKUP_SERIAL python3 -m unittest discover -s tests -p 'test_*.py' -v
 
 # Hermetic tests, then every read-only probe; never writes to a YubiKey.
 check: test dependencies-readonly ssh-fido2-readonly applets-readonly keepassxc-readonly

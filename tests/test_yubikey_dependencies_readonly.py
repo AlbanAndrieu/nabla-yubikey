@@ -1,7 +1,6 @@
 """Hermetic contracts: metadata-only GPG/PCSC/SSH/recovery dependencies."""
 from __future__ import annotations
 
-import importlib.util
 import io
 import json
 import stat
@@ -12,10 +11,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-SOURCE = Path(__file__).resolve().parents[1] / "scripts/workstation/inspect-yubikey-dependencies-readonly.py"
-spec = importlib.util.spec_from_file_location("yubi_dependencies_readonly", SOURCE)
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
+from probe_loader import load_probe
+
+module = load_probe("inspect-yubikey-dependencies-readonly.py")
 
 
 class DependencyContracts(unittest.TestCase):

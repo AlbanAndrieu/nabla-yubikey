@@ -1,6 +1,11 @@
 # Nabla YubiKey
 
-**Statut : dépôt initialisé, migration non appliquée.**
+**Statut : migration copiée le 01/11/2026** (scripts, tests, docs et 87 recettes `yubikey-*` de Compose dans [`compose.just`](compose.just)) ; cutover Compose par PR séparée.
+
+Les numéros de série ne sont jamais dans ce dépôt : les scripts ciblant une clé précise lisent
+`YUBIKEY_PRIMARY_SERIAL` et `YUBIKEY_BACKUP_SERIAL` dans l'environnement privé
+(`~/.config/environment.d/`). Sans eux, ils retombent sur des valeurs factices et refusent la clé
+branchée. `just test` retire ces variables pour rester hermétique.
 
 Dépôt dédié aux **contrôles, tests hermétiques et procédures de
 restauration YubiKey/age/SOPS/SSH-FIDO2**. Il succède progressivement
@@ -41,5 +46,6 @@ tests/fixturés**, jamais par réécriture aveugle de l'historique Git.
 Voir [roadmap priorisée](docs/roadmap.md), [plan de migration](docs/migration.md) et
 [runbook SSH FIDO2](docs/runbooks/ssh-fido2.md) et
 [inventaire des applets](docs/runbooks/inventaire-applets.md),
-[coffre KeePassXC](docs/runbooks/keepassxc.md). Le submodule dans
+[coffre KeePassXC](docs/runbooks/keepassxc.md),
+[sous-clé OpenPGP de `pass`](docs/runbooks/openpgp-sous-cle.md). Le submodule dans
 `nabla-compose` sera étudié après une première release locale testée.

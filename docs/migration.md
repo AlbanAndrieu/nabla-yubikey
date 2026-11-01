@@ -143,3 +143,27 @@ sur les deux environnements.
 **État de cette itération :** scripts, tests et documentation écrits,
 aucun test/diagnostic/CI réellement exécuté, aucune modification
 matérielle, aucune fusion.
+
+## Migration complète (01/11/2026)
+
+Copie depuis `nabla-compose` (`7d65743b`) de **125 fichiers** classés `candidate_yubikey_review`
+par `plan-repository-split.py`, plus leurs dépendances (sondes GPG/PC/SC, sauvegarde USB age,
+`scripts/lib/common.sh`, `shell-status.sh`) et les **87 recettes** `yubikey-*` dans `compose.just`,
+sous les mêmes noms et chemins. Les deux fichiers du lot 1 restent ceux d'ici (parité prouvée).
+
+**Numéros de série retirés :** Compose contenait en clair les numéros des deux YubiKey dans
+44 fichiers et le `justfile`. Ils sont remplacés par `11110001` (principale) et `11110002`
+(secondaire) ; les scripts lisent les vrais via `YUBIKEY_PRIMARY_SERIAL` / `YUBIKEY_BACKUP_SERIAL`,
+les recettes exigent ces variables (`${…:?}`), et les tests s'exécutent sans elles.
+
+**Preuves sur la workstation (secondaire branchée) :**
+
+- `just test` : 577 tests OK ; les 29 recettes `yubikey-*-test` OK, avec ou sans numéros dans l'environnement.
+- Sorties réelles identiques à Compose (hors numéro de ligne du `justfile`) pour
+  `yubikey-workstation-readonly`, `yubikey-gpg-agent-readonly`, `yubikey-diagnostics-host-readonly`,
+  `yubikey-applications-secondary-readonly` et `yubikey-escrow-usb-status` (code 3 des deux côtés, USB d'escrow absente).
+- Non prouvé : recettes nécessitant la principale, l'USB d'escrow, le NFS TrueNAS, ou une écriture
+  matérielle (`*-enroll`, `*-sign`, `*-run`, `*-backup`) ; elles sont copiées à l'identique, hors numéro de série.
+
+**Cutover :** [nabla-compose#317](https://github.com/AlbanAndrieu/nabla-compose/pull/317) (Draft) retire les copies et laisse un renvoi vers ce dépôt ; à fusionner après la PR #1 d'ici. L'historique
+Git de Compose contient toujours les numéros de série ; le réécrire est une décision séparée.
