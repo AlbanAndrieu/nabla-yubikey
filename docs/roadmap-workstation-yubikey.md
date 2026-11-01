@@ -1,6 +1,6 @@
 # Roadmap nabla-compose — YubiKey et intégrations workstation
 
-> **Mise à jour d'autorité (30/10/2026) :** le dépôt [nabla-yubikey](https://github.com/AlbanAndrieu/nabla-yubikey) existe, sa PR #1 est Draft ; le lot des dépendances readonly y est importé. La cible des runbooks matériels/escrow est maintenant ce dépôt ; Compose garde temporairement les 84 recettes historiques jusqu'à parité des tests. Le tableau ci-dessous documente **l'état historique avant cutover**. Suivi opérationnel transversal : [roadmap OpenClaw/YubiKey](roadmap-openclaw-yubikey-extraction-20261030.md).
+> **Mise à jour d'autorité (30/10/2026) :** le dépôt [nabla-yubikey](https://github.com/AlbanAndrieu/nabla-yubikey) existe, sa PR #1 est Draft ; le lot des dépendances readonly y est importé. La cible des runbooks matériels/escrow est maintenant ce dépôt ; Compose garde temporairement les 84 recettes historiques jusqu'à parité des tests. Le tableau ci-dessous documente **l'état historique avant cutover**. Suivi opérationnel transversal : [roadmap OpenClaw/YubiKey](https://github.com/AlbanAndrieu/nabla-compose/blob/master/docs/roadmap-openclaw-yubikey-extraction-20261030.md).
 
 > **30 octobre — extraction non encore réalisée :** le dépôt
 > [`nabla-yubikey`](https://github.com/AlbanAndrieu/nabla-yubikey) existe ;
@@ -30,7 +30,7 @@
 sauvegarde est actif et accessible en écriture, sans filtres `hosts`
 ou `networks` au niveau partage, avec `security=DEFAULT_UNVERIFIED`.
 Les trois flags sont documentés dans la
-[roadmap transversale](roadmap-openclaw-yubikey-extraction-20261030.md).
+[roadmap transversale](https://github.com/AlbanAndrieu/nabla-compose/blob/master/docs/roadmap-openclaw-yubikey-extraction-20261030.md).
 La sonde clients TCP/2049 a initialement retourné
 `SS_RESPONSE_UNVERIFIED` ; la correction du parseur `ss` a été **revalidée**
 sur TrueNAS depuis un worktree PR #300 au SHA `245bd928` : **8/8 tests PASS**,

@@ -1,6 +1,6 @@
 # Inventaire de transfert Workstation / YubiKey — 30 octobre 2026
 
-> **État Git du 30/10/2026 :** PR Compose #295 **fusionnée** ; PR nabla-openclaw #1 et PR ansible-workstation #16 **fusionnées** ; PR nabla-yubikey #1 **Draft**. Les 14 politiques Workstation sont dans `ops/openclaw-workstation/` et **4** fichiers sandbox restent dans `apps/openclaw/`. La migration du Gateway et du matériel n'est pas attestée. [Suivi actif](../roadmap-openclaw-yubikey-extraction-20261030.md).
+> **État Git du 30/10/2026 :** PR Compose #295 **fusionnée** ; PR nabla-openclaw #1 et PR ansible-workstation #16 **fusionnées** ; PR nabla-yubikey #1 **Draft**. Les 14 politiques Workstation sont dans `ops/openclaw-workstation/` et **4** fichiers sandbox restent dans `apps/openclaw/`. La migration du Gateway et du matériel n'est pas attestée. [Suivi actif](https://github.com/AlbanAndrieu/nabla-compose/blob/master/docs/roadmap-openclaw-yubikey-extraction-20261030.md).
 
 **Lecture seule.** Cette matrice distingue emplacement actuel et
 propriétaire cible, sans déplacer les fichiers. Source de décision :
@@ -64,7 +64,7 @@ par TrueNAS), de la clé **émise par TrueNAS LiteLLM**
 consommée par FastAPI). Seule la première est attestée
 générée le 28/10 ; aucune migration Git ou activation
 automatique n'est une preuve de son injection TrueNAS.
-[Suivi P0](../roadmap-openclaw-yubikey-extraction-20261030.md).
+[Suivi P0](https://github.com/AlbanAndrieu/nabla-compose/blob/master/docs/roadmap-openclaw-yubikey-extraction-20261030.md).
 
 ## Contrôle croisé vérifié dans le code — sandbox OpenClaw
 

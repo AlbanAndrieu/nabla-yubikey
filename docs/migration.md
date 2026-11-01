@@ -150,6 +150,8 @@ Copie depuis `nabla-compose` (`7d65743b`) de **125 fichiers** classés `candidat
 par `plan-repository-split.py`, plus leurs dépendances (sondes GPG/PC/SC, sauvegarde USB age,
 `scripts/lib/common.sh`, `shell-status.sh`) et les **87 recettes** `yubikey-*` dans `compose.just`,
 sous les mêmes noms et chemins. Les deux fichiers du lot 1 restent ceux d'ici (parité prouvée).
+`docs/roadmap-openclaw-yubikey-extraction-20261030.md` a été retiré d'ici le 01/11 : c'est le point de
+coordination inter-dépôts de Compose, qui le garde ; les liens y pointent.
 
 **Numéros de série retirés :** Compose contenait en clair les numéros des deux YubiKey dans
 44 fichiers et le `justfile`. Ils sont remplacés par `11110001` (principale) et `11110002`

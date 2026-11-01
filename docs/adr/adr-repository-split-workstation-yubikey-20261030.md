@@ -14,7 +14,7 @@
 > du sandbox est **NO-GO** tant que les consommateurs `build.sh`,
 > catalogue/topologie et les Apps TrueNAS ne sont pas validés.
 > [Registre des consommateurs](../migrations/openclaw-sandbox-consumers-go-no-go-20261030.md)
-> et [roadmap transversale](../roadmap-openclaw-yubikey-extraction-20261030.md).
+> et [roadmap transversale](https://github.com/AlbanAndrieu/nabla-compose/blob/master/docs/roadmap-openclaw-yubikey-extraction-20261030.md).
 
 
 > **Réception de la PR #300 (Workstation, HEAD `a05a5ec2`) :**
