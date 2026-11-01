@@ -203,22 +203,14 @@ class KeepassxcContracts(unittest.TestCase):
             cloud.symlink_to(Path(tmp) / "missing")
             with patch.object(module, "CLOUD_DIRS", (cloud,)):
                 self.assertEqual(module.cloud_keyfile_state(), "UNKNOWN")
-        vault = Vault()
-        try:
-            with patch.object(module, "HOME", vault.home), \
-                 patch.object(module, "CLOUD_DIRS", (Path(tmp) / "Dropbox",)), \
-                 patch.object(module, "yubikey_slot2", return_value="PROGRAMMED"):
-                # An inaccessible/unknown cloud state blocks even if no key was seen.
-                finding, _ = module.assess({
-                    "header": module.parse_header(kdbx4(ARGON2ID, 256)),
-                    "database_mode": "600", "keyfile_mode": "600",
-                    "keyfile_location": "SEPARATE", "cloud_keyfile_present": False,
-                    "cloud_keyfile_scan": "UNKNOWN", "yubikey_slot2": "PROGRAMMED",
-                    "keepassxc_ssh_agent": "ENABLED", "ssh_file_key_on_disk": False,
-                })
-                self.assertIn("CLOUD_KEYFILE_SCAN_UNKNOWN", finding)
-        finally:
-            vault.close()
+        findings, _ = module.assess({
+            "header": module.parse_header(kdbx4(ARGON2ID, 256)),
+            "database_mode": "600", "keyfile_mode": "600",
+            "keyfile_location": "SEPARATE", "cloud_keyfile_present": False,
+            "cloud_keyfile_scan": "UNKNOWN", "yubikey_slot2": "PROGRAMMED",
+            "keepassxc_ssh_agent": "ENABLED", "ssh_file_key_on_disk": False,
+        })
+        self.assertIn("CLOUD_KEYFILE_SCAN_UNKNOWN", findings)
 
     def test_ssh_agent_disabled_is_advice(self):
         report = self.report(Vault(ini="[SSHAgent]\nEnabled=false\n"))
