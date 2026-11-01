@@ -35,6 +35,8 @@ ssh-keygen -t ed25519-sk -O resident -O verify-required \
 
 Conséquence : **PIN + toucher à chaque signature** (connexion `ssh`, `git push` SSH, commit signé SSH). Pour réduire la fréquence : `ControlMaster auto` / `ControlPersist` dans `~/.ssh/config` (une authentification par connexion maîtresse), ou régénérer **sans** `verify-required` (toucher seul, le PIN n'est plus demandé : arbitrage de sécurité à décider explicitement).
 
+**Lecture SSH renforcée :** `ssh -G` (sans réseau) est limité à GitHub, TrueNAS et pfSense ; les autres sous-commandes sont refusées. Une option `ForwardAgent` absente, malformée ou multiple est classée `UNKNOWN`, jamais « désactivée ». Le `GO` porte sur la configuration locale uniquement et n'atteste pas une connexion avec la seconde clé.
+
 ## Répartition des clés (31/10)
 
 | Usage | Clé | Pourquoi |
