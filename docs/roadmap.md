@@ -12,6 +12,15 @@
 - **31/10, déverrouillage Vaultwarden** : `bw unlock` exige encore le mot de passe maître. L'OTP YubiKey est déjà actif dans Vaultwarden, mais il ne sert qu'à `bw login --method 3`, pas à `unlock`. Constats en lecture seule : la YubiKey testée a **0/3 emplacement OpenPGP rempli** et la clé de `pass` (`~/.password-store/.gpg-id`) est **logicielle**. `gpg --card-status` répondait `Card error` jusqu'à `gpgconf --kill scdaemon`.
 - **31/10, KeePassXC** : fichier clé sorti de Dropbox (local 600), coffre en Argon2id 256 Mio avec phrase de passe, ouverture **PASS** avec la YubiKey secondaire ; [runbook](runbooks/keepassxc.md), sonde `just keepassxc-readonly` **GO**. La clé SSH `ssh:nabla` et 7 identifiants FIDO2 (GitHub, Microsoft, AWS ×2, Bitwarden, Stripe, OpenAI) ne sont **que sur la secondaire**. Rapport de santé du coffre : 148/176 mots de passe faibles, 108 réutilisés (jusqu'à 29 fois).
 
+## Refactoring lecture seule — novembre 2026
+
+- [x] **Inventaire des applets** : allowlist de commandes `ykman`, refus des sorties OTP contradictoires et compteurs FIDO2/PIV/OpenPGP incomplets (`*_UNREADABLE` plutôt que faux `GO`).
+- [x] **KeePassXC** : parsing borné du seul en-tête externe KDBX, refus des champs malformés, des fichiers spéciaux et des algorithmes inconnus ; sélection locale du dernier fichier tolérante aux suppressions concurrentes.
+- [x] **SSH FIDO2** : exécution de sondes limitée aux commandes autorisées, traitement unifié des timeouts/sorties, état `ForwardAgent` ambigu classé `UNKNOWN`.
+- [x] **Justfile** : `just test` concis, `just test-verbose` pour investigations.
+- [ ] **Preuve d'exécution sur le HEAD** : `just test` puis `just dependencies-readonly`, `just ssh-fido2-readonly`, `just applets-readonly`, `just keepassxc-readonly` exécutés localement sur la workstation (une YubiKey à la fois). **Non exécuté par cet agent** en l'absence de checkout/réseau Git dans son environnement.
+- [ ] **Parité Compose** : comparer les structures JSON et sémantiques `GO/NO-GO`, documenter l'impact des changements fail-closed et maintenir les anciens wrappers jusqu'à validation.
+
 ## File de travail priorisée
 
 | Priorité | Lot | Livrable | Gate / état |
