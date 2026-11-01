@@ -24,12 +24,12 @@
 - [x] **KeePassXC** : détection des liens symboliques de fichier clé dans le cloud, `cloud_keyfile_scan` triétat, rejet des dossiers et des champs cryptographiques KDBX dupliqués.
 - [x] **Prérequis système** : contrôles des binaires PostgreSQL regroupés dans `trusted_executable`, émission JSON partagée, sans commande d'administration.
 - [x] **Contrats hermétiques** : scénarios de rejet ajoutés aux tests ; aucune exécution des tests ni diagnostic matériel demandée dans cette itération.
-- [ ] **Preuve d'exécution sur le HEAD** : `just test` puis `just dependencies-readonly`, `just ssh-fido2-readonly`, `just applets-readonly`, `just keepassxc-readonly` exécutés localement sur la workstation (une YubiKey à la fois). **Non exécuté par cet agent** en l'absence de checkout/réseau Git dans son environnement.
+- [x] **Preuve d'exécution sur le HEAD** (01/11, `8dbc06f`, workstation, secondaire seule) : `just test` 96 OK ; `ssh-fido2`, `applets`, `keepassxc` **GO** ; `dependencies-readonly` **NO-GO** par conception (aucune preuve de restauration). Principale : mêmes sondes **GO** sur `1960a49`.
 - [x] **Comparateur statique Compose** : `scripts/ops/compare-compose-contracts.py` (AST uniquement), champs `snapshot()` de `inspect-yubikey-dependencies-readonly.py`, état `SCHEMA_MATCH/NO-GO`, `runtime_parity_verified=false`, aucun appel Git/sonde ; recette `just compose-contract` et tests hermétiques ajoutés.
 - [x] **Sortie JSON partagée** : les quatre sondes conservent leur `mode` lors d'une exception ; erreur expurgée, `status=NO-GO`, `blocking=[PROBE_EXCEPTION]` sans chemin privé ni traceback.
 - [x] **Parité des valeurs simulées préparée** : `compare-probe-fixtures.py` compare les champs et les codes de sortie enregistrés sur scénarios synthétiques avec différences expurgées ; recette `just fixture-contract` (deux fichiers explicitement fournis).
 - [x] **Comparaison hermétique Compose ↔ YubiKey préparée** : `test_compose_runtime_parity.py` couvre les valeurs de snapshots, `status=NO-GO`, code 0 du rapport JSON et refus des arguments code 2 ; `just parity-tests` exige un checkout Compose local. Aucune commande d'observation effective durant les scénarios mockés.
-- [ ] **Preuve d'exécution et parité matérielle** : les deux comparateurs et la suite de tests ne sont pas exécutés dans cette itération. `FIXTURES_MATCH` / `SCHEMA_MATCH` ne prouvent ni la parité runtime ni les comportements matériels ; les anciennes recettes Compose restent maintenues.
+- [x] **Parité runtime du lot 1** (01/11, workstation) : `just compose-contract` **SCHEMA_MATCH**, `just parity-tests` OK, et les deux `inspect-yubikey-dependencies-readonly.py` (Compose et ici) lancés pour de vrai : **JSON identique**, codes 0 (sans argument) et 2 (argument refusé) identiques. Le wrapper Compose du lot 1 peut être déprécié ; les autres lots n'ont aucune parité prouvée.
 
 ## File de travail priorisée
 
