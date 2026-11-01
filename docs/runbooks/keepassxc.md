@@ -7,7 +7,7 @@
 > | Secondaire | 5 NFC (USB-A) | programmé le 31/10 | **PASS** avec la nouvelle phrase de passe |
 > | Principale | 5C NFC (USB-C) | déjà programmé (même secret) | **PASS** avec la nouvelle phrase de passe |
 >
-> Copie NAS : encore à l'ancien mot de passe, **à remplacer puis attester**.
+> Copie NAS : **mise à jour et ouverte avec la clé principale le 31/10/2026** ; seconde clé attestée sur le coffre de référence. Vérification croisée sur chaque copie et chaque clé à finaliser.
 
 ## Identifier la clé branchée
 
@@ -32,7 +32,7 @@ Le coffre exige les **trois** éléments ; perdre l'un d'eux = coffre perdu.
 
 Le coffre (Dropbox) et ses copies (NAS) sont chiffrés : seuls, ils ne suffisent pas à l'ouvrir.
 
-**Lecture KDBX renforcée :** l'inspection n'ouvre que des fichiers réguliers (aucun lien symbolique ni périphérique) et vérifie les champs externes avec une taille bornée. Un en-tête tronqué, un format cryptographique inconnu ou des métadonnées KDF incohérentes entraînent un **NO-GO**, sans essayer de déchiffrer le coffre. Le JSON de `just keepassxc-readonly` reste contractuel ; code de sortie 0 ≠ déverrouillage validé.
+**Lecture KDBX renforcée :** l'inspection n'ouvre que des fichiers réguliers (aucun lien symbolique ni périphérique), refuse les champs cryptographiques dupliqués ou incompatibles avec la version et vérifie les champs externes avec une taille bornée. Un en-tête tronqué, un format cryptographique inconnu ou des métadonnées KDF incohérentes entraînent un **NO-GO**, sans essayer de déchiffrer le coffre. Le JSON de `just keepassxc-readonly` reste contractuel ; code de sortie 0 ≠ déverrouillage validé.
 
 ## Diagnostic sans mot de passe
 
@@ -40,7 +40,7 @@ Le coffre (Dropbox) et ses copies (NAS) sont chiffrés : seuls, ils ne suffisent
 just keepassxc-readonly
 ```
 
-Lit l'en-tête KDBX non chiffré, les droits, `ykman list` / `ykman otp info` et `[SSHAgent]` de `keepassxc.ini`. N'envoie aucun challenge, n'affiche ni chemin ni numéro de série. `yubikey_role` indique quelle clé a été vérifiée (via `YUBIKEY_ROLES`). Surcharges : `KEEPASSXC_DB`, `KEEPASSXC_KEYFILE`.
+Lit l'en-tête KDBX non chiffré, les droits, `ykman list` / `ykman otp info` et `[SSHAgent]` de `keepassxc.ini`. N'envoie aucun challenge, n'affiche ni chemin ni numéro de série. `yubikey_role` indique quelle clé a été vérifiée (via `YUBIKEY_ROLES`). Surcharges : `KEEPASSXC_DB`, `KEEPASSXC_KEYFILE`. Le rapport distingue `cloud_keyfile_present` et `cloud_keyfile_scan` (`PRESENT`, `ABSENT`, `UNKNOWN`) ; une détection inconnue ou un lien symbolique vers un fichier clé dans Dropbox ne peut plus être interprété comme l'absence de fuite.
 
 | Bloquant | Correction |
 | --- | --- |
