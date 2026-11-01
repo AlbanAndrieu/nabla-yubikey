@@ -43,7 +43,7 @@ Conséquence : **PIN + toucher à chaque signature** (connexion `ssh`, `git push
 | --- | --- | --- |
 | `git push` GitHub depuis Workstation | `id_ed25519_sk_principale` (5C NFC) ou `id_ed25519_sk` (secondaire, 5 NFC) | Une clé `ssh:nabla` par YubiKey, les deux sur GitHub ; PIN + toucher ; une clé absente est sautée |
 | truenas, pfsense | `id_ed25519` | Ces hôtes ne connaissent pas les YubiKey : ils les refusent sans demander de PIN, puis acceptent la clé fichier |
-| Secours GitHub (break-glass) | `id_ed25519`, toujours enregistrée sur GitHub | **Jamais proposée automatiquement** : `GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519" git push` |
+| Secours GitHub (break-glass) | `id_ed25519`, toujours enregistrée sur GitHub | **Jamais proposée automatiquement** : `GIT_SSH_COMMAND="ssh -F /dev/null -o ControlPath=none -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519" git push` (sans `-F /dev/null` ni `ControlPath=none`, la connexion maîtresse ouverte ou les YubiKey de la config passent avant `-i`) |
 | Signature des commits | Clé OpenPGP (`commit.gpgsign = true`) | Commits « Verified » sur GitHub, indépendants de la clé SSH |
 
 `ForwardAgent no` partout : un root distant pourrait utiliser l'agent transféré, y compris la clé fichier sans aucune confirmation. TrueNAS utilise sa propre clé pour ses accès sortants.

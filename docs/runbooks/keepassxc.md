@@ -40,7 +40,7 @@ Le coffre (Dropbox) et ses copies (NAS) sont chiffrés : seuls, ils ne suffisent
 just keepassxc-readonly
 ```
 
-Lit l'en-tête KDBX non chiffré, les droits, `ykman list` / `ykman otp info` et `[SSHAgent]` de `keepassxc.ini`. N'envoie aucun challenge, n'affiche ni chemin ni numéro de série. Surcharges : `KEEPASSXC_DB`, `KEEPASSXC_KEYFILE`.
+Lit l'en-tête KDBX non chiffré, les droits, `ykman list` / `ykman otp info` et `[SSHAgent]` de `keepassxc.ini`. N'envoie aucun challenge, n'affiche ni chemin ni numéro de série. `yubikey_role` indique quelle clé a été vérifiée (via `YUBIKEY_ROLES`). Surcharges : `KEEPASSXC_DB`, `KEEPASSXC_KEYFILE`.
 
 | Bloquant | Correction |
 | --- | --- |

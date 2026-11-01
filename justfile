@@ -11,6 +11,9 @@ test-verbose:
     python3 -m py_compile scripts/workstation/*.py tests/*.py
     python3 -m unittest discover -s tests -p 'test_*.py' -v
 
+# Hermetic tests, then every read-only probe; never writes to a YubiKey.
+check: test dependencies-readonly ssh-fido2-readonly applets-readonly keepassxc-readonly
+
 dependencies-readonly:
     python3 scripts/workstation/inspect-yubikey-dependencies-readonly.py
 

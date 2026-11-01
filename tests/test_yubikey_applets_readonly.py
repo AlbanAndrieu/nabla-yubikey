@@ -1,20 +1,17 @@
 """Hermetic contracts: read-only YubiKey applet inventory, no serial leak."""
 from __future__ import annotations
 
-import importlib.util
 import io
 import json
 import subprocess
 import unittest
 from contextlib import redirect_stdout
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-SOURCE = Path(__file__).resolve().parents[1] / "scripts/workstation/inspect-yubikey-applets-readonly.py"
-spec = importlib.util.spec_from_file_location("yubikey_applets_readonly", SOURCE)
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
+from probe_loader import load_probe
+
+module = load_probe("inspect-yubikey-applets-readonly.py")
 
 LIST = "YubiKey 5 NFC (5.4.3) [OTP+FIDO+CCID] Serial: 12345678\n"
 DEVICE = """Device type: YubiKey 5 NFC
@@ -50,15 +47,15 @@ def fake_run(outputs):
 
 
 def snapshot_with(**overrides):
-    with patch.object(module.shutil, "which", return_value="/usr/bin/ykman"), \
-         patch.object(module.subprocess, "run", side_effect=fake_run({**OUTPUTS, **overrides})):
+    with patch("shutil.which", return_value="/usr/bin/ykman"), \
+         patch("subprocess.run", side_effect=fake_run({**OUTPUTS, **overrides})):
         return module.snapshot()
 
 
 class AppletContracts(unittest.TestCase):
     def test_ykman_is_read_only_and_never_prompts(self):
-        with patch.object(module.shutil, "which", return_value="/usr/bin/ykman"), \
-             patch.object(module.subprocess, "run", side_effect=fake_run(OUTPUTS)) as run:
+        with patch("shutil.which", return_value="/usr/bin/ykman"), \
+             patch("subprocess.run", side_effect=fake_run(OUTPUTS)) as run:
             module.snapshot()
         commands = [call.args[0] for call in run.call_args_list]
         self.assertEqual(commands, [["ykman", "list"], ["ykman", "list", "--serials"], ["ykman", "info"],
@@ -67,27 +64,27 @@ class AppletContracts(unittest.TestCase):
         for call in run.call_args_list:
             self.assertEqual(call.kwargs["stdin"], subprocess.DEVNULL)
 
-    def test_role_from_local_last4_mapping_never_returns_serial(self):
-        self.assertEqual(module.device_role("12345678\n", "5678=principale,1111=secours"), "principale")
-        self.assertEqual(module.device_role("12345678\n", "1111=secours"), "UNLABELED")
-        self.assertEqual(module.device_role("12345678\n87654321\n", "5678=principale"), "UNKNOWN")
-        self.assertEqual(module.device_role("12345678\n", "5678=$(rm -rf)"), "UNLABELED")
-        with patch.dict(module.os.environ, {"YUBIKEY_ROLES": "5678=principale"}):
+    def test_report_names_the_plugged_key_role(self):
+        with patch.dict("os.environ", {"YUBIKEY_ROLES": "5678=principale"}):
             report = snapshot_with()
         self.assertEqual(report["role"], "principale")
         self.assertEqual(report["otp"], {"slot1": True, "slot2": False})
 
+    def test_unreadable_section_never_hides_other_findings(self):
+        report = snapshot_with(fido=None, piv=PIV + "WARNING: Using default PIN!\n")
+        self.assertIn("FIDO_UNREADABLE", report["blocking"])
+        self.assertIn("PIV_DEFAULT_CREDENTIALS", report["blocking"])
+        self.assertNotIn("FIDO2_PIN_NOT_SET", report["blocking"])
+
     def test_unrecognized_otp_output_is_unreadable_not_empty(self):
-        self.assertIsNone(module.parse_otp(""))
-        self.assertIsNone(module.parse_otp("Slot 1: programmed\n"))
         report = snapshot_with(otp="Device busy\n")
         self.assertIsNone(report["otp"])
         self.assertIn("OTP_UNREADABLE", report["blocking"])
 
     def test_go_report_never_leaks_serial_subject_or_aaguid(self):
         out = io.StringIO()
-        with patch.object(module.shutil, "which", return_value="/usr/bin/ykman"), \
-             patch.object(module.subprocess, "run", side_effect=fake_run(OUTPUTS)), redirect_stdout(out):
+        with patch("shutil.which", return_value="/usr/bin/ykman"), \
+             patch("subprocess.run", side_effect=fake_run(OUTPUTS)), redirect_stdout(out):
             self.assertEqual(module.main([]), 0)
         report = json.loads(out.getvalue())
         self.assertEqual(report["status"], "GO")
@@ -137,20 +134,20 @@ class AppletContracts(unittest.TestCase):
             self.assertIn("OTP_UNREADABLE", snapshot_with(otp=raw)["blocking"])
 
     def test_refuse_mutating_ykman_commands_without_spawning_a_process(self):
-        with patch.object(module.shutil, "which", return_value="/usr/bin/ykman"), \
-             patch.object(module.subprocess, "run") as runner:
+        with patch("shutil.which", return_value="/usr/bin/ykman"), \
+             patch("subprocess.run") as runner:
             for args in (["piv", "reset"], ["fido", "reset"],
                          ["otp", "chalresp", "2"], ["config", "usb", "--disable", "OTP"]):
                 self.assertIsNone(module.ykman(args))
             runner.assert_not_called()
 
     def test_missing_ykman_fails_closed(self):
-        with patch.object(module.shutil, "which", return_value=None), \
-             patch.object(module.subprocess, "run") as run:
+        with patch("shutil.which", return_value=None), \
+             patch("subprocess.run") as run:
             self.assertEqual(module.snapshot()["status"], "NO-GO")
             run.assert_not_called()
-        with patch.object(module.shutil, "which", return_value="/usr/bin/ykman"), \
-             patch.object(module.subprocess, "run", side_effect=subprocess.TimeoutExpired(["ykman"], 15)):
+        with patch("shutil.which", return_value="/usr/bin/ykman"), \
+             patch("subprocess.run", side_effect=subprocess.TimeoutExpired(["ykman"], 15)):
             self.assertIsNone(module.ykman(["list"]))
 
     def test_arguments_rejected(self):

@@ -7,18 +7,17 @@ and never prints key material, fingerprints or paths.
 """
 from __future__ import annotations
 
-import json
 import re
-import shutil
-import subprocess
 import sys
+
+from probe_common import main_json, run_bounded, verdict
 
 GIT_HOST = "github.com"
 SERVER_HOSTS = ("truenas", "pfsense")
 
 
-def read_metadata(command: list[str], timeout: int = 5) -> tuple[int, str] | None:
-    """Bounded, allowlisted, no-stdin commands only; never return stderr."""
+def read_metadata(command: list[str]) -> str | None:
+    """Allowlisted metadata commands only, through the shared bounded runner."""
     permitted = (
         command[:2] == ["ssh", "-G"] and len(command) == 3
         and command[2] in (GIT_HOST, *SERVER_HOSTS)
@@ -26,22 +25,10 @@ def read_metadata(command: list[str], timeout: int = 5) -> tuple[int, str] | Non
         command[:4] == ["git", "config", "--global", "--get"]
         and len(command) == 5 and command[4] in ("commit.gpgsign", "gpg.format")
     )
-    if not permitted or not shutil.which(command[0]):
-        return None
-    try:
-        done = subprocess.run(command, stdin=subprocess.DEVNULL,
-                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                              text=True, timeout=timeout, check=False)
-    except (OSError, UnicodeError, ValueError, subprocess.TimeoutExpired):
-        return None
-    if (not isinstance(done.stdout, str) or len(done.stdout) > 65536
-            or "\x00" in done.stdout):
+    if not permitted:
         return None
     # git config --get returns 1 for an unset key; other failures fail closed.
-    allowed_codes = (0, 1) if command[0] == "git" else (0,)
-    if done.returncode not in allowed_codes:
-        return None
-    return done.returncode, done.stdout
+    return run_bounded(command, timeout=5, ok_codes=(0, 1) if command[0] == "git" else (0,))
 
 
 def ssh_config(host: str) -> dict[str, list[str]] | None:
@@ -50,9 +37,9 @@ def ssh_config(host: str) -> dict[str, list[str]] | None:
     if result is None:
         return None
     options: dict[str, list[str]] = {}
-    for line in result[1].splitlines():
+    for line in result.splitlines():
         key, sep, value = line.partition(" ")
-        if not sep or not value or not key.isascii() or not key.isalpha():
+        if not sep or not value or not key.isascii() or not key.isalnum():
             return None
         options.setdefault(key.lower(), []).append(value)
     return options or None
@@ -99,7 +86,7 @@ def agent_environment() -> dict[str, str]:
         return {}
     wanted = ("SSH_ASKPASS", "WAYLAND_DISPLAY")
     return {key: value for key, sep, value in
-            (line.partition("=") for line in result[1].splitlines())
+            (line.partition("=") for line in result.splitlines())
             if sep and key in wanted and len(value) <= 4096}
 
 
@@ -117,7 +104,7 @@ def git_config(key: str) -> str | None:
     result = read_metadata(["git", "config", "--global", "--get", key])
     if result is None:
         return None
-    return "" if result[0] == 1 else result[1].strip()
+    return result.strip()
 
 
 def commit_signing_state() -> str:
@@ -129,14 +116,32 @@ def commit_signing_state() -> str:
     return "OPENPGP" if git_config("gpg.format") in ("", "openpgp") else "NOT_OPENPGP"
 
 
+def assess(report: dict) -> list[str]:
+    """Each blocking code names the host or setting that breaks the key split."""
+    blocking = []
+    if report["github_identity"] != "SK_FIRST":
+        blocking.append(f"GITHUB_{report['github_identity']}")
+    # Agent keys are tried in agent order: an offered file key signs without PIN when a YubiKey is absent.
+    if report["github_file_key"] != "FILE_KEY_MISSING":
+        blocking.append(f"GITHUB_{report['github_file_key']}")
+    for host in SERVER_HOSTS:
+        if report["server_identity"][host] != "FILE_KEY_OFFERED":
+            blocking.append(f"{host.upper()}_{report['server_identity'][host]}")
+        if report["server_agent_forwarding"][host] != "NOT_FORWARDED":
+            blocking.append(f"{host.upper()}_{report['server_agent_forwarding'][host]}")
+    if report["agent_askpass"] == "X11_ASKPASS_UNDER_WAYLAND":
+        blocking.append("AGENT_X11_ASKPASS_UNDER_WAYLAND")
+    if report["commit_signing"] != "OPENPGP":
+        blocking.append(f"COMMIT_SIGNING_{report['commit_signing']}")
+    return blocking
+
+
 def snapshot() -> dict:
     github_options = ssh_config(GIT_HOST)
-    github = identity_order(github_options)
     servers = {host: ssh_config(host) for host in SERVER_HOSTS}
     report = {
         "mode": "SSH_FIDO2_LOCAL_CONFIG_ONLY",
-        "github_identity": github,
-        # Agent keys are tried in agent order: an offered file key signs without PIN when a YubiKey is absent.
+        "github_identity": identity_order(github_options),
         "github_file_key": file_key_offered(github_options),
         "server_identity": {host: file_key_offered(opts) for host, opts in servers.items()},
         "server_agent_forwarding": {host: forward_agent(opts) for host, opts in servers.items()},
@@ -145,22 +150,11 @@ def snapshot() -> dict:
         "ssh_fido_login_verified": False,
         "hardware_mutation_authorized": False,
     }
-    ok = (github == "SK_FIRST" and report["github_file_key"] == "FILE_KEY_MISSING"
-          and all(state == "FILE_KEY_OFFERED" for state in report["server_identity"].values())
-          and all(state == "NOT_FORWARDED" for state in report["server_agent_forwarding"].values())
-          and report["agent_askpass"] != "X11_ASKPASS_UNDER_WAYLAND"
-          and report["commit_signing"] == "OPENPGP")
-    report["status"] = "GO" if ok else "NO-GO"
-    return report
+    return verdict(report, assess(report), [])
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = sys.argv[1:] if argv is None else argv
-    if args:
-        print("No arguments supported", file=sys.stderr)
-        return 2
-    print(json.dumps(snapshot(), sort_keys=True))
-    return 0
+    return main_json(snapshot, argv)
 
 
 if __name__ == "__main__":

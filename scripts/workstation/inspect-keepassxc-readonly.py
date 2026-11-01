@@ -12,14 +12,14 @@ overridable with KEEPASSXC_DB and KEEPASSXC_KEYFILE.
 from __future__ import annotations
 
 import configparser
-import json
 import os
 import shutil
 import stat
 import struct
-import subprocess
 import sys
 from pathlib import Path
+
+from probe_common import line_count, main_json, parse_otp, run_bounded, verdict, yubikey_role
 
 CIPHERS = {"31c1f2e6bf714350be5805216afc5aff": "AES-256", "d6038a2b8b6f4cb5a524339a31dbb59a": "ChaCha20",
            "ad68f29f576f4bb9a36ad47af965346c": "Twofish"}
@@ -144,33 +144,16 @@ def keyfile_location(db: Path | None, keyfile: Path | None) -> str:
     return "SEPARATE"
 
 
-def run(args: list[str]) -> str | None:
-    if not shutil.which(args[0]):
-        return None
-    try:
-        done = subprocess.run(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                              stderr=subprocess.DEVNULL, text=True, timeout=15, check=False)
-    except (OSError, UnicodeError, ValueError, subprocess.TimeoutExpired):
-        return None
-    if done.returncode != 0 or len(done.stdout) > 65536:
-        return None
-    return done.stdout
-
-
 def yubikey_slot2() -> str:
-    listing = run(["ykman", "list"])
-    if listing is None:
+    count = line_count(run_bounded(["ykman", "list"]))
+    if count is None:
         return "UNKNOWN"
-    count = len([line for line in listing.splitlines() if line.strip()])
     if count != 1:
         return f"DEVICE_COUNT_{count}"
-    info = run(["ykman", "otp", "info"])
-    if info is None:
+    slots = parse_otp(run_bounded(["ykman", "otp", "info"]))
+    if slots is None:
         return "UNKNOWN"
-    # A busy device can print something else: never read that as an empty slot.
-    if "Slot 2: programmed" in info.splitlines():
-        return "PROGRAMMED"
-    return "EMPTY" if "Slot 2: empty" in info.splitlines() else "UNKNOWN"
+    return "PROGRAMMED" if slots["slot2"] else "EMPTY"
 
 
 def ssh_agent_setting(ini: Path) -> str:
@@ -241,24 +224,18 @@ def snapshot() -> dict:
         "keyfile_location": keyfile_location(db, keyfile),
         "cloud_keyfile_present": any(newest(cloud, "*.key") for cloud in CLOUD_DIRS),
         "yubikey_slot2": yubikey_slot2(),
+        "yubikey_role": yubikey_role(),
         "keepassxc_cli": "INSTALLED_UNVERIFIED" if shutil.which("keepassxc-cli") else "MISSING",
         "keepassxc_ssh_agent": ssh_agent_setting(HOME / ".config/keepassxc/keepassxc.ini"),
         "ssh_file_key_on_disk": (HOME / ".ssh/id_ed25519").exists(),
         "database_unlock_verified": False,
         "hardware_mutation_authorized": False,
     }
-    blocking, advice = assess(report)
-    report.update(status="NO-GO" if blocking else "GO", blocking=blocking, advice=advice)
-    return report
+    return verdict(report, *assess(report))
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = sys.argv[1:] if argv is None else argv
-    if args:
-        print("No arguments supported", file=sys.stderr)
-        return 2
-    print(json.dumps(snapshot(), sort_keys=True))
-    return 0
+    return main_json(snapshot, argv)
 
 
 if __name__ == "__main__":
