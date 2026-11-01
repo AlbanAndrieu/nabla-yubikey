@@ -95,6 +95,7 @@ def parse_header(raw: bytes) -> dict | None:
         info = {"version": f"{major}.{minor}"}
         size_fmt, size_len = ("<I", 4) if major >= 4 else ("<H", 2)
         pos = 12
+        seen_fields: set[int] = set()
         while pos + 1 + size_len <= len(raw):
             field = raw[pos]
             size = struct.unpack_from(size_fmt, raw, pos + 1)[0]
@@ -105,6 +106,12 @@ def parse_header(raw: bytes) -> dict | None:
             pos += size
             if field == 0:
                 return info if value == b"\r\n\r\n" else None
+            # A duplicate or KDBX-version-incompatible crypto field is ambiguous.
+            if field in (2, 6, 11):
+                if (field in seen_fields or (field == 6 and major == 4)
+                        or (field == 11 and major == 3)):
+                    return None
+                seen_fields.add(field)
             if field == 2:
                 info["cipher"] = CIPHERS.get(value.hex(), "unknown")
             elif field == 6:
@@ -127,8 +134,11 @@ def mode(path: Path | None) -> str:
     if path is None:
         return "NOT_FOUND"
     try:
-        return oct(stat.S_IMODE(path.lstat().st_mode))[2:]
-    except OSError:
+        info = path.lstat()
+        return oct(stat.S_IMODE(info.st_mode))[2:] if stat.S_ISREG(info.st_mode) else "UNSAFE_FILE_TYPE"
+    except FileNotFoundError:
+        return "NOT_FOUND"
+    except (OSError, ValueError):
         return "UNKNOWN"
 
 
@@ -136,12 +146,36 @@ def keyfile_location(db: Path | None, keyfile: Path | None) -> str:
     """A key file next to the vault, or in the same cloud, adds nothing if that place leaks."""
     if keyfile is None:
         return "NOT_FOUND"
-    resolved = keyfile.resolve()
-    if any(resolved.is_relative_to(cloud) for cloud in CLOUD_DIRS):
-        return "IN_CLOUD"
-    if db is not None and resolved.parent == db.resolve().parent:
-        return "WITH_DATABASE"
-    return "SEPARATE"
+    try:
+        resolved = keyfile.resolve()
+        if any(resolved.is_relative_to(cloud.resolve()) for cloud in CLOUD_DIRS):
+            return "IN_CLOUD"
+        if db is not None and resolved.parent == db.resolve().parent:
+            return "WITH_DATABASE"
+        return "SEPARATE"
+    except (OSError, RuntimeError, ValueError):
+        return "UNKNOWN"
+
+
+def cloud_keyfile_state() -> str:
+    """Observe cloud key-file names only, including symlinks; never read contents.
+
+    UNKNOWN fails closed if the cloud directory cannot safely be enumerated.
+    """
+    for cloud in CLOUD_DIRS:
+        try:
+            metadata = cloud.lstat()
+            if not stat.S_ISDIR(metadata.st_mode):
+                return "UNKNOWN"
+            for candidate in cloud.glob("*.key"):
+                # A symlink may still expose a local key through the cloud folder.
+                candidate.lstat()
+                return "PRESENT"
+        except FileNotFoundError:
+            continue
+        except (OSError, RuntimeError, ValueError):
+            return "UNKNOWN"
+    return "ABSENT"
 
 
 def yubikey_slot2() -> str:
@@ -190,6 +224,8 @@ def assess(report: dict) -> tuple[list[str], list[str]]:
         blocking.append(f"KEYFILE_{report['keyfile_location']}")
     if report["cloud_keyfile_present"]:
         blocking.append("KEYFILE_LEFT_IN_CLOUD")
+    if report.get("cloud_keyfile_scan") == "UNKNOWN":
+        blocking.append("CLOUD_KEYFILE_SCAN_UNKNOWN")
     if report["yubikey_slot2"] != "PROGRAMMED":
         blocking.append(f"YUBIKEY_SLOT2_{report['yubikey_slot2']}")
     if report["keepassxc_ssh_agent"] != "ENABLED":
@@ -216,13 +252,15 @@ def snapshot() -> dict:
                         header = parse_header(handle.read(65536))
         except (OSError, ValueError):
             header = None
+    cloud_state = cloud_keyfile_state()
     report = {
         "mode": "KEEPASSXC_READONLY",
         "header": header,
         "database_mode": mode(db),
         "keyfile_mode": mode(keyfile),
         "keyfile_location": keyfile_location(db, keyfile),
-        "cloud_keyfile_present": any(newest(cloud, "*.key") for cloud in CLOUD_DIRS),
+        "cloud_keyfile_present": cloud_state == "PRESENT",
+        "cloud_keyfile_scan": cloud_state,
         "yubikey_slot2": yubikey_slot2(),
         "yubikey_role": yubikey_role(),
         "keepassxc_cli": "INSTALLED_UNVERIFIED" if shutil.which("keepassxc-cli") else "MISSING",
