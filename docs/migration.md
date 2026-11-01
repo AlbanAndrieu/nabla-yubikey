@@ -64,7 +64,7 @@ codes de sortie réels, de l'accès matériel ou des scénarios de récupératio
 doit être supprimé sur cette seule base.
 
 Les quatre scripts de lecture seule partagent `main_json`, notamment le
-retour JSON `NO-GO` redigé en cas d'exception avec conservation du champ
+retour JSON `NO-GO` expurgé en cas d'exception avec conservation du champ
 `mode`. Les scripts matériels, l'accès aux secrets et les tests réels restent
 hors de ce comparateur.
 
