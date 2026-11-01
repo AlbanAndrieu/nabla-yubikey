@@ -8,6 +8,12 @@ just applets-readonly
 
 La sonde lance seulement `ykman list`, `ykman info`, `ykman fido info`, `ykman openpgp info` et `ykman piv info`. Elle ne demande aucun PIN, n'écrit rien sur la carte et n'affiche ni numéro de série, ni AAGUID, ni sujet de certificat : seulement compteurs, drapeaux et noms de slots PIV. Plus d'une clé branchée = `NO-GO` (`DEVICE_COUNT_NOT_ONE`).
 
+## Interprétation stricte des diagnostics
+
+Les réponses `ykman` qui ne contiennent pas explicitement les deux slots OTP, les compteurs requis pour FIDO2/PIV/OpenPGP ou les informations firmware/applications sont classées `*_UNREADABLE` et **NO-GO** : une sortie tronquée ne prouve jamais une configuration saine. Les commandes matériellement modificatrices sont refusées par une allowlist fixe.
+
+Les sondes renvoient un **document JSON** avec `status: GO | NO-GO`. Leur code de sortie 0 signifie que le rapport a été émis, **pas** que l'état matériel est GO. Les compteurs et états reflètent uniquement la clé branchée au moment du contrôle. Pour vérifier les deux clés, les brancher successivement, jamais simultanément.
+
 ## Bloquants (`NO-GO`)
 
 | Code | Signification |
