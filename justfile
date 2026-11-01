@@ -14,6 +14,11 @@ test-verbose:
 # Hermetic tests, then every read-only probe; never writes to a YubiKey.
 check: test dependencies-readonly ssh-fido2-readonly applets-readonly keepassxc-readonly
 
+# Offline schema comparison only. Never executes Compose scripts or probes.
+# Override COMPOSE_ROOT in your shell if the repositories are not siblings.
+compose-contract:
+    python3 scripts/ops/compare-compose-contracts.py --compose-root "${COMPOSE_ROOT:-../nabla-compose}" --assert-field-parity
+
 dependencies-readonly:
     python3 scripts/workstation/inspect-yubikey-dependencies-readonly.py
 
