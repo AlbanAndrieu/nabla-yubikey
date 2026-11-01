@@ -12,6 +12,8 @@ La sonde lance seulement `ykman list`, `ykman info`, `ykman fido info`, `ykman o
 
 Les réponses `ykman` qui ne contiennent pas explicitement les deux slots OTP, les compteurs requis pour FIDO2/PIV/OpenPGP ou les informations firmware/applications sont classées `*_UNREADABLE` et **NO-GO** : une sortie tronquée ne prouve jamais une configuration saine. Les commandes matériellement modificatrices sont refusées par une allowlist fixe.
 
+Les compteurs dupliqués, les messages supplémentaires dans le rapport OTP et les états USB/NFC inconnus sont également classés illisibles. Le rôle est dérivé localement de `YUBIKEY_ROLES` et seules les étiquettes publiques `principale`, `secondaire`, `secours`, `primary` ou `backup` sont acceptées ; une attribution ambiguë devient `UNKNOWN`, jamais une valeur libre issue de l'environnement.
+
 Les sondes renvoient un **document JSON** avec `status: GO | NO-GO`. Leur code de sortie 0 signifie que le rapport a été émis, **pas** que l'état matériel est GO. Les compteurs et états reflètent uniquement la clé branchée au moment du contrôle. Pour vérifier les deux clés, les brancher successivement, jamais simultanément.
 
 ## Bloquants (`NO-GO`)
