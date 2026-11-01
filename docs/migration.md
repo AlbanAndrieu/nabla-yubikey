@@ -70,3 +70,76 @@ hors de ce comparateur.
 
 **État de cette PR :** code et tests écrits ; aucun test ni diagnostic lancé
 pendant la présente itération, pas de CI GitHub, pas de migration définitive.
+
+## Parité fonctionnelle simulée et valeurs JSON (code préparé)
+
+Pour comparer les **valeurs** sans lancer les sondes, deux voies complémentaires
+ont été ajoutées. Elles ne déverrouillent rien, ne contactent aucun hôte et ne
+doivent recevoir **aucune archive, fichier clé ni diagnostic nominatif**.
+
+### 1. Comparaison de rapports de scénarios synthétiques
+
+`scripts/ops/compare-probe-fixtures.py` compare deux fichiers JSON distincts,
+chacun contenant la même série de scénarios :
+
+```json
+{
+  "schema": "nabla-yubikey/probe-fixtures/v1",
+  "cases": [
+    {"name": "invalid_args", "exit_code": 2, "report": null}
+  ]
+}
+```
+
+Un scénario avec `exit_code: 0` fournit un `report` complet, strictement
+limité aux champs connus de `inspect-yubikey-dependencies-readonly.py` :
+statut `NO-GO`, `mode: HOST_DEPENDENCIES_METADATA_ONLY`, booléens de
+preuve à `false`, métadonnées des processus, et outils de récupération
+(`INSTALLED_UNVERIFIED` ou `MISSING`). Aucun numéro de série, chemin
+privé ou message brut d'erreur n'est accepté dans le format de comparaison.
+
+```bash
+export COMPOSE_PROBE_FIXTURES=/chemin/vers/compose-fixtures-synthetiques.json
+export YUBIKEY_PROBE_FIXTURES=/chemin/vers/yubikey-fixtures-synthetiques.json
+just fixture-contract
+```
+
+Les fichiers sont lus avec une taille maximale, sans suivre le lien
+symbolique final. Les clés inconnues, doublons JSON, cas dupliqués,
+`exit_code` différent de 0/2 et valeurs inattendues sont refusés
+(`status=NO-GO`). Le rapport n'affiche **que les noms des champs**
+différents, les codes fixes et les identifiants de scénarios. Une
+comparaison identique donne `FIXTURES_MATCH` et un code 0 ;
+l'option `--assert-fixture-parity` retourne 2 autrement.
+
+### 2. Tests hermétiques des versions source et migrée
+
+`tests/test_compose_runtime_parity.py` importe **uniquement** le script
+de dépendances du checkout Compose de confiance et sa version extraite.
+Pendant les appels `snapshot()`, les observations externes et
+`shutil.which` sont remplacés par des mocks ; les scénarios synthétiques
+couvrent outils absents, présence partielle, états inconnus et code
+d'arguments refusés (2), ainsi que l'émission JSON normale (0).
+
+```bash
+# Avec les checkouts côte à côte, commande à réserver à une validation ultérieure :
+just parity-tests
+
+# Sinon, COMPOSE_ROOT=~/w/nabla-compose just parity-tests
+```
+
+Si le checkout Compose est absent, la recette `just` échoue au
+pré-requis plutôt que d'annoncer un succès après un test `SKIP`.
+Cette suite importe du Python local : **n'utiliser que des checkouts
+de confiance**, même si les appels observateurs sont simulés.
+
+**Limites strictes :** `FIXTURES_MATCH`, `SCHEMA_MATCH` et
+les tests hermétiques ne sont pas des preuves de parité en conditions
+réelles : `runtime_parity_verified=false` dans les rapports de
+comparaison. Les anciennes recettes Compose et leurs consommateurs
+restent en place jusqu'à la preuve d'exécution et de retour arrière
+sur les deux environnements.
+
+**État de cette itération :** scripts, tests et documentation écrits,
+aucun test/diagnostic/CI réellement exécuté, aucune modification
+matérielle, aucune fusion.
