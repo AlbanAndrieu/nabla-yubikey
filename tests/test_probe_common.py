@@ -94,6 +94,28 @@ class ParsingContracts(unittest.TestCase):
         self.assertEqual(probe_common.line_count("a\n\nb\n"), 2)
         self.assertIsNone(probe_common.line_count(None))
 
+    def test_snapshot_exception_is_redacted_no_go_json(self):
+        def failed():
+            raise RuntimeError("private workspace /home/user/secrets/age-escrow.txt")
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = probe_common.main_json(failed, [])
+        self.assertEqual(code, 0)  # JSON emitted; status conveys probe failure.
+        self.assertEqual(
+            __import__("json").loads(out.getvalue()),
+            {"status": "NO-GO", "blocking": ["PROBE_EXCEPTION"],
+             "advice": [], "hardware_mutation_authorized": False},
+        )
+        self.assertNotIn("secrets", out.getvalue())
+
+    def test_snapshot_must_return_json_object(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = probe_common.main_json(lambda: ["unexpected"], [])
+        self.assertEqual(code, 0)
+        self.assertIn("PROBE_EXCEPTION", out.getvalue())
+        self.assertNotIn("unexpected", out.getvalue())
+
     def test_main_json_exit_codes(self):
         out = io.StringIO()
         with redirect_stdout(out):
