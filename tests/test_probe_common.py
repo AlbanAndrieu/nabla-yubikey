@@ -40,6 +40,19 @@ class RunBoundedContracts(unittest.TestCase):
             self.assertIsNone(probe_common.run_bounded(["tool"]))
             run.assert_not_called()
 
+    def test_rejects_invalid_commands_and_unexpected_error_payload(self):
+        with patch("shutil.which", return_value="/usr/bin/tool"), \
+             patch("subprocess.run") as runner:
+            for args in ([], ["tool", ""], ["tool", "bad\x00arg"]):
+                self.assertIsNone(probe_common.run_bounded(args))
+            runner.assert_not_called()
+        self.assertIsNone(self.run_with(
+            done(returncode=1, stdout="unexpected data"), ok_codes=(0, 1),
+            require_empty_on_error=True)[0])
+        self.assertEqual(self.run_with(
+            done(returncode=1, stdout=""), ok_codes=(0, 1),
+            require_empty_on_error=True)[0], "")
+
     def test_accepted_exit_codes_are_explicit(self):
         self.assertEqual(self.run_with(done(returncode=1, stdout=""), ok_codes=(0, 1))[0], "")
 
@@ -58,6 +71,19 @@ class ParsingContracts(unittest.TestCase):
         self.assertEqual(role("12345678\n87654321\n", "5678=principale"), "UNKNOWN")
         self.assertEqual(role(None, "5678=principale"), "UNKNOWN")
         self.assertEqual(role("12345678\n", "5678=$(rm -rf)"), "UNLABELED")
+
+    def test_otp_rejects_additional_status_messages(self):
+        for raw in ("Slot 1: programmed\nSlot 2: empty\nDevice busy\n",
+                    "Slot 1: programmed\nSlot 2: empty\nSlot 2: programmed\n",
+                    "Slot 1: programmed\nSlot 2: empty\nError: unexpected\n"):
+            self.assertIsNone(probe_common.parse_otp(raw))
+
+    def test_role_mapping_rejects_ambiguous_or_private_labels(self):
+        role = probe_common.device_role
+        self.assertEqual(role("12345678\n", "5678=principale,5678=secondaire"), "UNKNOWN")
+        self.assertEqual(role("12345678\n", "5678=secret_internal"), "UNLABELED")
+        self.assertEqual(role("12345678\n", "5678=principale"), "principale")
+        self.assertEqual(role("12345678\n", "5678=secondary"), "UNLABELED")
 
     def test_verdict(self):
         self.assertEqual(probe_common.verdict({}, [], ["ADVICE"]),
