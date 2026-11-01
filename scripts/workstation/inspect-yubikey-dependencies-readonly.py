@@ -109,6 +109,18 @@ def scdaemon_agent_state() -> str:
         return "UNKNOWN"
 
 
+def trusted_executable(binary: Path, owners: tuple[int, ...]) -> bool:
+    """Inspect executable metadata only, refusing symlinks and unexpected owners."""
+    if binary.is_symlink():
+        return False
+    try:
+        info = binary.lstat()
+    except FileNotFoundError:
+        return False
+    return (stat.S_ISREG(info.st_mode) and info.st_uid in owners
+            and bool(stat.S_IMODE(info.st_mode) & 0o111))
+
+
 def postgres_versioned_tools_state() -> str:
     """Stat only conventional Debian/Ubuntu root-owned server executables.
 
@@ -128,20 +140,8 @@ def postgres_versioned_tools_state() -> str:
             binary_dir = version / "bin"
             if binary_dir.is_symlink():
                 continue
-            checks = []
-            for name in ("initdb", "pg_ctl"):
-                binary = binary_dir / name
-                if binary.is_symlink():
-                    checks.append(False)
-                    continue
-                try:
-                    info = binary.lstat()
-                    checks.append(
-                        stat.S_ISREG(info.st_mode) and info.st_uid == 0
-                        and bool(stat.S_IMODE(info.st_mode) & 0o111)
-                    )
-                except FileNotFoundError:
-                    checks.append(False)
+            checks = [trusted_executable(binary_dir / name, (0,))
+                      for name in ("initdb", "pg_ctl")]
             if all(checks):
                 return "VERSIONED_SERVER_BINARIES_PRESENT_UNVERIFIED"
             if any(checks):
@@ -176,21 +176,8 @@ def postgres_pg_config_server_tools_state() -> str:
         directory = Path(value)
         if directory.is_symlink() or not directory.is_dir():
             return "BINDIR_UNAVAILABLE"
-        found = []
-        for name in ("initdb", "pg_ctl"):
-            binary = directory / name
-            if binary.is_symlink():
-                found.append(False)
-                continue
-            try:
-                info = binary.lstat()
-                found.append(
-                    stat.S_ISREG(info.st_mode) and
-                    info.st_uid in (0, os.getuid()) and
-                    bool(stat.S_IMODE(info.st_mode) & 0o111)
-                )
-            except FileNotFoundError:
-                found.append(False)
+        found = [trusted_executable(directory / name, (0, os.getuid()))
+                 for name in ("initdb", "pg_ctl")]
         if all(found):
             return "PG_CONFIG_SERVER_BINARIES_PRESENT_UNVERIFIED"
         return ("PG_CONFIG_SERVER_BINARIES_PARTIAL"
