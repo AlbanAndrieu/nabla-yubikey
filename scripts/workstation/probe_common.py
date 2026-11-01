@@ -90,19 +90,28 @@ def verdict(report: dict, blocking: list[str], advice: list[str]) -> dict:
     return report
 
 
-def main_json(snapshot: Callable[[], dict], argv: list[str] | None = None) -> int:
+def main_json(snapshot: Callable[[], dict], argv: list[str] | None = None,
+              mode: str | None = None) -> int:
+    """Emit one redacted JSON report even on internal failures, never a traceback."""
     args = sys.argv[1:] if argv is None else argv
     if args:
         print("No arguments supported", file=sys.stderr)
         return 2
+
+    def failed() -> dict:
+        result = {"status": "NO-GO", "blocking": ["PROBE_EXCEPTION"],
+                  "advice": [], "hardware_mutation_authorized": False}
+        if mode is not None:
+            result["mode"] = mode
+        return result
+
     try:
         report = snapshot()
         if not isinstance(report, dict):
             raise TypeError("snapshot contract")
+        serialized = json.dumps(report, sort_keys=True, allow_nan=False)
     except Exception:
-        # Never emit exception messages: they may contain private paths or
-        # values from a user configuration. A failed probe is never a GO.
-        report = {"status": "NO-GO", "blocking": ["PROBE_EXCEPTION"],
-                  "advice": [], "hardware_mutation_authorized": False}
-    print(json.dumps(report, sort_keys=True))
+        # Exception details may contain private paths or environment values.
+        serialized = json.dumps(failed(), sort_keys=True)
+    print(serialized)
     return 0
