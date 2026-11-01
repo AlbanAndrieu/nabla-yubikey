@@ -20,8 +20,9 @@ def ykman(args: list[str]) -> str | None:
 
 
 def number(pattern: str, raw: str) -> int | None:
-    match = re.search(pattern, raw, re.MULTILINE)
-    return int(match.group(1)) if match else None
+    """Exactly one counter, never the first of contradictory repeated lines."""
+    matches = re.findall(pattern, raw, re.MULTILINE)
+    return int(matches[0]) if len(matches) == 1 else None
 
 
 def parse_device(raw: str) -> dict | None:
@@ -30,11 +31,17 @@ def parse_device(raw: str) -> dict | None:
     in_table = False
     for line in raw.splitlines():
         if line.startswith("Applications"):
+            if in_table:
+                return None
             in_table = True
             continue
+        if not in_table or not line.strip():
+            continue
         cells = [cell.strip() for cell in line.split("\t")]
-        if in_table and len(cells) == 3:
-            apps[cells[0]] = {"usb": cells[1] == "Enabled", "nfc": cells[2] == "Enabled"}
+        if (len(cells) != 3 or not cells[0] or cells[0] in apps
+                or any(state not in ("Enabled", "Disabled") for state in cells[1:])):
+            return None
+        apps[cells[0]] = {"usb": cells[1] == "Enabled", "nfc": cells[2] == "Enabled"}
     # A truncated ykman response must not be treated as a healthy applet set.
     if firmware is None or not apps:
         return None
@@ -43,10 +50,11 @@ def parse_device(raw: str) -> dict | None:
 
 def parse_fido(raw: str) -> dict | None:
     """Do not treat unknown/missing PIN metadata as PIN configured."""
-    remaining = number(r"^PIN:\s+(\d+) attempt\(s\) remaining\s*$", raw)
-    if remaining is not None:
-        return {"pin_set": True, "pin_attempts": remaining}
-    if re.search(r"^PIN:\s+Not set\s*$", raw, re.MULTILINE):
+    attempts = re.findall(r"^PIN:\s+(\d+) attempt\(s\) remaining\s*$", raw, re.MULTILINE)
+    not_set = re.findall(r"^PIN:\s+Not set\s*$", raw, re.MULTILINE)
+    if len(attempts) == 1 and not not_set:
+        return {"pin_set": True, "pin_attempts": int(attempts[0])}
+    if len(not_set) == 1 and not attempts:
         return {"pin_set": False, "pin_attempts": None}
     return None
 
@@ -54,16 +62,16 @@ def parse_fido(raw: str) -> dict | None:
 def parse_openpgp(raw: str) -> dict | None:
     pin = number(r"^PIN tries remaining:\s+(\d+)", raw)
     admin = number(r"^Admin PIN tries remaining:\s+(\d+)", raw)
-    kdf = re.search(r"^KDF enabled:\s+(True|False)\s*$", raw, re.MULTILINE)
-    if pin is None or admin is None or kdf is None:
+    kdf = re.findall(r"^KDF enabled:\s+(True|False)\s*$", raw, re.MULTILINE)
+    if pin is None or admin is None or len(kdf) != 1:
         return None
     return {"pin_tries": pin, "admin_pin_tries": admin,
-            "kdf_enabled": kdf.group(1) == "True"}
+            "kdf_enabled": kdf[0] == "True"}
 
 
 def parse_piv(raw: str) -> dict | None:
-    pin = number(r"^PIN tries remaining:\s+(\d+)", raw)
-    puk = number(r"^PUK tries remaining:\s+(\d+)", raw)
+    pin = number(r"^PIN tries remaining:\s+(\d+)(?:/\d+)?\s*$", raw)
+    puk = number(r"^PUK tries remaining:\s+(\d+)(?:/\d+)?\s*$", raw)
     if pin is None or puk is None:
         return None
     return {"pin_tries": pin, "puk_tries": puk,
