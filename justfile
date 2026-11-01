@@ -19,6 +19,11 @@ check: test dependencies-readonly ssh-fido2-readonly applets-readonly keepassxc-
 compose-contract:
     python3 scripts/ops/compare-compose-contracts.py --compose-root "${COMPOSE_ROOT:-../nabla-compose}" --assert-field-parity
 
+# Requires two independently curated, non-sensitive fixture files.
+# Never runs probes; prints only field names and fixed diagnostic codes.
+fixture-contract:
+    python3 scripts/ops/compare-probe-fixtures.py --compose-fixtures "${COMPOSE_PROBE_FIXTURES:?COMPOSE_PROBE_FIXTURES is required}" --yubikey-fixtures "${YUBIKEY_PROBE_FIXTURES:?YUBIKEY_PROBE_FIXTURES is required}" --assert-fixture-parity
+
 dependencies-readonly:
     python3 scripts/workstation/inspect-yubikey-dependencies-readonly.py
 
