@@ -112,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--assert-field-parity", action="store_true",
                         help="Exit 2 if the snapshot field sets differ")
     args = parser.parse_args(argv)
-    report = compare(args.compose_root)
+    report = compare(args.compose_root, ROOT)
     print(json.dumps(report, sort_keys=True))
     return 2 if args.assert_field_parity and not report["fields_match"] else 0
 
