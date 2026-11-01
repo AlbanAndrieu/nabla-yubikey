@@ -141,6 +141,29 @@ class AppletContracts(unittest.TestCase):
                 self.assertIsNone(module.ykman(args))
             runner.assert_not_called()
 
+    def test_duplicate_counters_and_pin_conflicts_fail_closed(self):
+        samples = (
+            ("fido", FIDO + "PIN: 0 attempt(s) remaining\n", "FIDO_UNREADABLE"),
+            ("fido", FIDO + "PIN: Not set\n", "FIDO_UNREADABLE"),
+            ("openpgp", OPENPGP + "KDF enabled: True\n", "OPENPGP_UNREADABLE"),
+            ("openpgp", OPENPGP + "PIN tries remaining: 0\n", "OPENPGP_UNREADABLE"),
+            ("piv", PIV + "PUK tries remaining: 0/3\n", "PIV_UNREADABLE"),
+        )
+        for section, raw, code in samples:
+            with self.subTest(section=section, finding=code):
+                report = snapshot_with(**{section: raw})
+                self.assertEqual(report["status"], "NO-GO")
+                self.assertIn(code, report["blocking"])
+
+    def test_unknown_or_conflicting_application_states_fail_closed(self):
+        for raw in (DEVICE.replace("Enabled\tDisabled", "Enabled\tUnknown"),
+                    DEVICE.replace("Enabled\tDisabled", "Enabled\tDisabled") + "FIDO2\tEnabled\tEnabled\n",
+                    DEVICE.replace("FIDO2       \tEnabled\tDisabled", "FIDO2       \tEnabled")):
+            with self.subTest(raw=raw[-50:]):
+                report = snapshot_with(info=raw)
+                self.assertEqual(report["status"], "NO-GO")
+                self.assertIn("DEVICE_UNREADABLE", report["blocking"])
+
     def test_missing_ykman_fails_closed(self):
         with patch("shutil.which", return_value=None), \
              patch("subprocess.run") as run:
