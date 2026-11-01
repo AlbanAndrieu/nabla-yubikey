@@ -137,6 +137,38 @@ class SshFido2Contracts(unittest.TestCase):
         file_first = "identityfile ~/.ssh/id_ed25519\nidentityfile ~/.ssh/id_ed25519_sk\n"
         self.assertEqual(snapshot_with(**{"github.com": file_first})["status"], "NO-GO")
 
+    def test_absent_or_duplicate_forward_agent_value_is_not_safe(self):
+        self.assertEqual(module.forward_agent({}), "UNKNOWN")
+        self.assertEqual(module.forward_agent({"forwardagent": ["no", "yes"]}), "UNKNOWN")
+        self.assertEqual(module.forward_agent({"forwardagent": ["yes"]}), "AGENT_FORWARDED")
+        self.assertEqual(module.forward_agent({"forwardagent": ["no"]}), "NOT_FORWARDED")
+        report = snapshot_with(pfsense=SERVER + "forwardagent yes\n")
+        self.assertEqual(report["server_agent_forwarding"]["pfsense"], "UNKNOWN")
+        self.assertEqual(report["status"], "NO-GO")
+
+    def test_metadata_runner_rejects_unapproved_and_malformed_commands(self):
+        with patch.object(module.shutil, "which", return_value="/usr/bin/x"), \
+             patch.object(module.subprocess, "run") as runner:
+            for command in (["ssh", "-T", "github.com"], ["ssh", "-G", "example.com"],
+                            ["git", "config", "--global", "--get", "credential.helper"],
+                            ["systemctl", "--user", "start", "gcr-ssh-agent"]):
+                self.assertIsNone(module.read_metadata(command))
+            runner.assert_not_called()
+        with patch.object(module.shutil, "which", return_value="/usr/bin/ssh"), \
+             patch.object(module.subprocess, "run", return_value=SimpleNamespace(
+                 returncode=0, stdout="forwardagent no\nbadline\n")):
+            self.assertIsNone(module.ssh_config("github.com"))
+
+    def test_unset_git_config_distinct_from_failed_git_command(self):
+        with patch.object(module.shutil, "which", return_value="/usr/bin/git"), \
+             patch.object(module.subprocess, "run", return_value=SimpleNamespace(
+                 returncode=1, stdout="")):
+            self.assertEqual(module.git_config("gpg.format"), "")
+        with patch.object(module.shutil, "which", return_value="/usr/bin/git"), \
+             patch.object(module.subprocess, "run", return_value=SimpleNamespace(
+                 returncode=2, stdout="")):
+            self.assertIsNone(module.git_config("gpg.format"))
+
     def test_arguments_rejected(self):
         with patch("sys.stderr", new=io.StringIO()):
             self.assertEqual(module.main(["--fix"]), 2)
