@@ -161,7 +161,7 @@ def snapshot() -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    return main_json(snapshot, argv)
+    return main_json(snapshot, argv, mode="SSH_FIDO2_LOCAL_CONFIG_ONLY")
 
 
 if __name__ == "__main__":
