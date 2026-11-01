@@ -5,7 +5,7 @@
 ## État vérifié dans Git
 
 - Dépôt dédié créé ; PR [#1](https://github.com/AlbanAndrieu/nabla-yubikey/pull/1) **Draft, non fusionnée** au contrôle du 30/10.
-- **Lot 1 importé dans cette PR** : `inspect-yubikey-dependencies-readonly.py` et ses tests hermétiques ; aucun accès smartcard, aucune modification système. Le `justfile` contient `test`, `dependencies-readonly`, `ssh-fido2-readonly`, `applets-readonly` et `keepassxc-readonly`.
+- **Lot 1 importé dans cette PR** : `inspect-yubikey-dependencies-readonly.py` et ses tests hermétiques ; aucun accès smartcard, aucune modification système. Le `justfile` contient `test`, `dependencies-readonly`, `ssh-fido2-readonly`, `applets-readonly`, `keepassxc-readonly` et `check` (tout).
 - `nabla-compose` [PR #295](https://github.com/AlbanAndrieu/nabla-compose/pull/295) **fusionnée** : les anciennes recettes et scripts YubiKey restent la référence temporaire jusqu'à parité documentée.
 - Les prérequis OS sont déjà traités par `ansible-workstation` ; ne pas réintroduire de tâches PAM globales.
 - **31/10** : clé SSH FIDO2 résidente générée sur décision explicite et signature via `gcr-ssh-agent` PASS ; procédure et piège askpass/Wayland dans le [runbook SSH FIDO2](runbooks/ssh-fido2.md). Clé publique ajoutée sur GitHub (push PASS, PIN demandé) ; commits signés OpenPGP « Verified ». truenas/pfsense restent sur `id_ed25519`, sans transfert d'agent. Sonde `just ssh-fido2-readonly` : **GO**.
@@ -23,7 +23,7 @@
 | P0 | 3 — récupération age/SOPS | Vérification des métadonnées de deux copies indépendantes (USB + cible hors support commun), test synthétique et restauration isolée | **Partiel** : une récupération SOPS avec identité USB a déjà été signalée PASS ; cela ne démontre pas deux copies indépendantes ni un PRA complet |
 | P0 | 4 — escrow USB/NFS | Sonde client readonly + contrats de chemin NFS ; permissions strictes et cas d'échec NFS non monté | **À importer** ; exports/ACL côté TrueNAS restent Compose |
 | P1 | 5 — protocole matériel | Inventaire FIDO2, OpenPGP, OTP2, PIV et 0x82 ; NO-GO par défaut | **Partiel** : SSH FIDO2 fait ([runbook](runbooks/ssh-fido2.md), sonde `ssh-fido2-readonly` + tests) ; inventaire FIDO2/OpenPGP/PIV/OTP en lecture seule fait ([runbook](runbooks/inventaire-applets.md), sonde `applets-readonly` : **GO**, conseils KDF/NFC/OTP non appliqués) ; slot PIV 0x82 et usages OATH non inventoriés |
-| P1 | 6 — compatibilité | Parité du `just --list`, chemins/imports, statuts/codes sortie 0/2 et wrappers Compose | **À prouver sur Workstation** |
+| P1 | 6 — compatibilité | Parité du `just --list`, chemins/imports, statuts/codes sortie 0/2 et wrappers Compose | **Partiel (01/11)** : les sondes ajoutées partagent `probe_common.py` (commande bornée sans stdin, échec fermé, JSON trié, sortie 0/2) et `just check` lance tests + sondes ; la sonde du lot 1 reste identique à l'original Compose. Wrappers Compose **à prouver sur Workstation** |
 | P1 | 7 — cutover GitOps | Marquer les anciens scripts Compose comme dépréciés, transférer les liens de runbook, puis supprimer seulement les doublons sans consommateurs | **Bloqué par parité et revue** |
 | P2 | 8 — intégration dans Compose | Évaluer `security/nabla-yubikey` piné, sans submodule automatique ni données runtime | **Différé** jusqu'à release/commit testé |
 
@@ -32,14 +32,14 @@
 Objectif : chacune des deux clés suffit seule. Les écritures matérielles restent lancées par l'opérateur, une clé branchée à la fois, en testant l'autre clé avant toute réécriture.
 
 1. [x] **KeePassXC — principale** : `keepassxc-cli db-info … --yubikey "2:<série>"` avec elle seule : **PASS le 31/10** (slot 2 déjà programmé avec le même secret).
-2. [ ] **Copie NAS du coffre** : remplacer par la version à la nouvelle phrase de passe, puis l'ouvrir avec chaque clé.
-3. [ ] **Fichier clé** : copie sur USB hors ligne, puis retrait de la copie NAS rangée à côté du coffre.
-4. [x] **SSH principale** (31/10) : `id_ed25519_sk_principale` créée, sur GitHub, acceptée avec la principale seule. `id_ed25519` reste sur GitHub en secours manuel mais n'est plus proposée à `github.com` (`Match host "*,!github.com"`), sinon elle authentifiait sans PIN quand la secondaire était absente ([runbook](runbooks/ssh-fido2.md)). Reste : test GitHub avec la **secondaire** seule ; sauvegarde des fichiers `_sk` dans `lab/secret/ssh`.
+2. [x] **Copie NAS du coffre** (31/10) : remplacée par la version à la nouvelle phrase de passe (identique octet pour octet au coffre Dropbox), ouverte avec la principale : Argon2id 256 Mio, 176 entrées. La secondaire ouvre le même contenu (testée sur le coffre Dropbox).
+3. [ ] **Fichier clé** : copie sur l'USB d'escrow chiffrée LUKS (`keepassxc-escrow/`, 700/600) **faite le 01/11**, identique aux copies locale et NAS. Reste : retrait de la copie NAS rangée à côté du coffre, sur décision de l'opérateur.
+4. [x] **SSH principale** (31/10) : `id_ed25519_sk_principale` créée, sur GitHub, acceptée avec la principale seule. `id_ed25519` reste sur GitHub en secours manuel mais n'est plus proposée à `github.com` (`Match host "*,!github.com"`), sinon elle authentifiait sans PIN quand la secondaire était absente ([runbook](runbooks/ssh-fido2.md)). Secours manuel `id_ed25519` attesté (commande du runbook). Fichiers `_sk` et `.pub` sauvegardés dans `lab/secret/ssh` (600/644), clés privées de cette sauvegarde passées en 600 ; la copie `id_ed25519` du NAS a la même empreinte que la clé courante. Reste : test GitHub avec la **secondaire** seule.
 5. [ ] **FIDO2 principale** : l'enregistrer comme seconde clé de sécurité sur GitHub, Microsoft, AWS (×2), Bitwarden, puis Stripe et OpenAI.
 6. [ ] **`id_ed25519` dans KeePassXC** (agent SSH), test truenas/pfsense coffre ouvert/verrouillé, puis retrait du fichier privé de `~/.ssh` (garder le `.pub`).
 7. [ ] **Mots de passe** : rapport *Santé* de KeePassXC, rotation des réutilisés en commençant par les comptes de récupération (e-mail, GitHub, banque, Vaultwarden, registrar).
 8. [ ] **Appui obligatoire** sur le slot 2 de la secondaire (`ykman otp chalresp --touch 2`, même secret) une fois l'étape 1 attestée.
-9. [ ] **`YUBIKEY_ROLES`** déclaré localement ; décisions séparées sur OTP USB, NFC et KDF OpenPGP ([inventaire](runbooks/inventaire-applets.md)).
+9. [ ] **`YUBIKEY_ROLES`** déclaré localement le 31/10 (`~/.config/environment.d/50-yubikey-roles.conf`, la sonde affiche `principale`) ; décisions séparées sur OTP USB, NFC et KDF OpenPGP ([inventaire](runbooks/inventaire-applets.md)). **OTP USB constaté le 31/10** : un effleurement a tapé un code Yubico OTP dans un terminal ; Vaultwarden utilisant Yubico OTP, ne pas désactiver sans le remplacer (ex. `ykman otp swap` pour un appui long, ou WebAuthn dans Vaultwarden).
 
 ## Séquence locale sans effet matériel
 

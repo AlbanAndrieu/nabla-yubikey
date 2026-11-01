@@ -1,7 +1,6 @@
 """Hermetic contracts: KeePassXC vault diagnosis without password or challenge."""
 from __future__ import annotations
 
-import importlib.util
 import io
 import json
 import struct
@@ -12,10 +11,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-SOURCE = Path(__file__).resolve().parents[1] / "scripts/workstation/inspect-keepassxc-readonly.py"
-spec = importlib.util.spec_from_file_location("keepassxc_readonly", SOURCE)
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
+from probe_loader import load_probe
+
+module = load_probe("inspect-keepassxc-readonly.py")
 
 AES = bytes.fromhex("31c1f2e6bf714350be5805216afc5aff")
 ARGON2D = bytes.fromhex("ef636ddf8c29444b91f7a9a403e30a0c")
@@ -56,6 +54,8 @@ class Vault:
 
     def snapshot(self, ykman_otp: str = "Slot 1: programmed\nSlot 2: programmed\n", devices: int = 1):
         def run(command, **kwargs):
+            if command == ["ykman", "list", "--serials"]:
+                return SimpleNamespace(returncode=0, stdout="12345678\n" * devices)
             if command[:2] == ["ykman", "list"]:
                 return SimpleNamespace(returncode=0, stdout="YubiKey 5 NFC Serial: 12345678\n" * devices)
             return SimpleNamespace(returncode=0, stdout=ykman_otp)
@@ -63,8 +63,8 @@ class Vault:
         with patch.object(module, "HOME", self.home), \
              patch.object(module, "CLOUD_DIRS", (self.home / "Dropbox",)), \
              patch.dict(module.os.environ, {}, clear=True), \
-             patch.object(module.shutil, "which", return_value="/usr/bin/x"), \
-             patch.object(module.subprocess, "run", side_effect=run), \
+             patch("shutil.which", return_value="/usr/bin/x"), \
+             patch("subprocess.run", side_effect=run), \
              redirect_stdout(out):
             module.main([])
         return out.getvalue()

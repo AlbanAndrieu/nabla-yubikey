@@ -7,11 +7,10 @@ and never prints key material, fingerprints or paths.
 """
 from __future__ import annotations
 
-import json
 import re
-import shutil
-import subprocess
 import sys
+
+from probe_common import main_json, run_bounded, verdict
 
 GIT_HOST = "github.com"
 SERVER_HOSTS = ("truenas", "pfsense")
@@ -19,18 +18,11 @@ SERVER_HOSTS = ("truenas", "pfsense")
 
 def ssh_config(host: str) -> dict[str, list[str]] | None:
     """Return resolved `ssh -G` options, or None when they cannot be trusted."""
-    if not shutil.which("ssh"):
-        return None
-    try:
-        done = subprocess.run(["ssh", "-G", host], stdin=subprocess.DEVNULL,
-                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                              text=True, timeout=5, check=False)
-    except (OSError, UnicodeError, ValueError, subprocess.TimeoutExpired):
-        return None
-    if done.returncode != 0 or len(done.stdout) > 65536 or "\x00" in done.stdout:
+    raw = run_bounded(["ssh", "-G", host], timeout=5)
+    if raw is None:
         return None
     options: dict[str, list[str]] = {}
-    for line in done.stdout.splitlines():
+    for line in raw.splitlines():
         key, _, value = line.partition(" ")
         options.setdefault(key.lower(), []).append(value)
     return options
@@ -66,18 +58,9 @@ def forward_agent(options: dict[str, list[str]] | None) -> str:
 
 def agent_environment() -> dict[str, str]:
     """Read only the askpass variables of the systemd user manager, which starts gcr-ssh-agent."""
-    if not shutil.which("systemctl"):
-        return {}
-    try:
-        done = subprocess.run(["systemctl", "--user", "show-environment"],
-                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                              stderr=subprocess.DEVNULL, text=True, timeout=5, check=False)
-    except (OSError, UnicodeError, ValueError, subprocess.TimeoutExpired):
-        return {}
-    if done.returncode != 0 or len(done.stdout) > 65536:
-        return {}
+    raw = run_bounded(["systemctl", "--user", "show-environment"], timeout=5) or ""
     wanted = ("SSH_ASKPASS", "WAYLAND_DISPLAY")
-    return {key: value for key, _, value in (line.partition("=") for line in done.stdout.splitlines())
+    return {key: value for key, _, value in (line.partition("=") for line in raw.splitlines())
             if key in wanted}
 
 
@@ -92,15 +75,9 @@ def askpass_state(env: dict[str, str]) -> str:
 
 
 def git_config(key: str) -> str | None:
-    if not shutil.which("git"):
-        return None
-    try:
-        done = subprocess.run(["git", "config", "--global", "--get", key],
-                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                              stderr=subprocess.DEVNULL, text=True, timeout=5, check=False)
-    except (OSError, UnicodeError, ValueError, subprocess.TimeoutExpired):
-        return None
-    return done.stdout.strip() if done.returncode == 0 else ""
+    """Value of a global git setting, "" when unset (exit 1), None when git cannot answer."""
+    raw = run_bounded(["git", "config", "--global", "--get", key], timeout=5, ok_codes=(0, 1))
+    return None if raw is None else raw.strip()
 
 
 def commit_signing_state() -> str:
@@ -112,14 +89,32 @@ def commit_signing_state() -> str:
     return "OPENPGP" if git_config("gpg.format") in ("", "openpgp") else "NOT_OPENPGP"
 
 
+def assess(report: dict) -> list[str]:
+    """Each blocking code names the host or setting that breaks the key split."""
+    blocking = []
+    if report["github_identity"] != "SK_FIRST":
+        blocking.append(f"GITHUB_{report['github_identity']}")
+    # Agent keys are tried in agent order: an offered file key signs without PIN when a YubiKey is absent.
+    if report["github_file_key"] != "FILE_KEY_MISSING":
+        blocking.append(f"GITHUB_{report['github_file_key']}")
+    for host in SERVER_HOSTS:
+        if report["server_identity"][host] != "FILE_KEY_OFFERED":
+            blocking.append(f"{host.upper()}_{report['server_identity'][host]}")
+        if report["server_agent_forwarding"][host] != "NOT_FORWARDED":
+            blocking.append(f"{host.upper()}_{report['server_agent_forwarding'][host]}")
+    if report["agent_askpass"] == "X11_ASKPASS_UNDER_WAYLAND":
+        blocking.append("AGENT_X11_ASKPASS_UNDER_WAYLAND")
+    if report["commit_signing"] != "OPENPGP":
+        blocking.append(f"COMMIT_SIGNING_{report['commit_signing']}")
+    return blocking
+
+
 def snapshot() -> dict:
     github_options = ssh_config(GIT_HOST)
-    github = identity_order(github_options)
     servers = {host: ssh_config(host) for host in SERVER_HOSTS}
     report = {
         "mode": "SSH_FIDO2_LOCAL_CONFIG_ONLY",
-        "github_identity": github,
-        # Agent keys are tried in agent order: an offered file key signs without PIN when a YubiKey is absent.
+        "github_identity": identity_order(github_options),
         "github_file_key": file_key_offered(github_options),
         "server_identity": {host: file_key_offered(opts) for host, opts in servers.items()},
         "server_agent_forwarding": {host: forward_agent(opts) for host, opts in servers.items()},
@@ -128,22 +123,11 @@ def snapshot() -> dict:
         "ssh_fido_login_verified": False,
         "hardware_mutation_authorized": False,
     }
-    ok = (github == "SK_FIRST" and report["github_file_key"] == "FILE_KEY_MISSING"
-          and all(state == "FILE_KEY_OFFERED" for state in report["server_identity"].values())
-          and all(state == "NOT_FORWARDED" for state in report["server_agent_forwarding"].values())
-          and report["agent_askpass"] != "X11_ASKPASS_UNDER_WAYLAND"
-          and report["commit_signing"] == "OPENPGP")
-    report["status"] = "GO" if ok else "NO-GO"
-    return report
+    return verdict(report, assess(report), [])
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = sys.argv[1:] if argv is None else argv
-    if args:
-        print("No arguments supported", file=sys.stderr)
-        return 2
-    print(json.dumps(snapshot(), sort_keys=True))
-    return 0
+    return main_json(snapshot, argv)
 
 
 if __name__ == "__main__":

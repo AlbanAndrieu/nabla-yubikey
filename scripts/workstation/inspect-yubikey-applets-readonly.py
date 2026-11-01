@@ -6,62 +6,15 @@ number, certificate subjects or fingerprints: only counters and flags.
 """
 from __future__ import annotations
 
-import json
-import os
 import re
-import shutil
-import subprocess
 import sys
 
-COMMANDS = {
-    "device": ["info"],
-    "fido": ["fido", "info"],
-    "openpgp": ["openpgp", "info"],
-    "piv": ["piv", "info"],
-    "otp": ["otp", "info"],
-}
+from probe_common import line_count, main_json, parse_otp, run_bounded, verdict, yubikey_role
 
 
 def ykman(args: list[str]) -> str | None:
     """Run one read-only ykman command; None when its output cannot be trusted."""
-    if not shutil.which("ykman"):
-        return None
-    try:
-        done = subprocess.run(["ykman", *args], stdin=subprocess.DEVNULL,
-                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                              text=True, timeout=15, check=False)
-    except (OSError, UnicodeError, ValueError, subprocess.TimeoutExpired):
-        return None
-    if done.returncode != 0 or len(done.stdout) > 65536 or "\x00" in done.stdout:
-        return None
-    return done.stdout
-
-
-def device_role(serials: str | None, roles: str) -> str:
-    """Map the serial's last 4 digits to a local label (YUBIKEY_ROLES="1234=principale,5678=secours").
-
-    The mapping stays in the operator's environment; the serial is never returned.
-    """
-    lines = [] if serials is None else [line.strip() for line in serials.splitlines() if line.strip()]
-    if len(lines) != 1 or not lines[0].isdigit():
-        return "UNKNOWN"
-    for pair in roles.split(","):
-        last4, _, label = pair.strip().partition("=")
-        if last4 and last4 == lines[0][-4:] and label.isidentifier():
-            return label
-    return "UNLABELED"
-
-
-def parse_otp(raw: str) -> dict | None:
-    """None unless both slots are reported: a busy device must not read as an empty slot."""
-    states = dict(re.findall(r"^Slot ([12]): (programmed|empty)$", raw, re.MULTILINE))
-    if set(states) != {"1", "2"}:
-        return None
-    return {f"slot{n}": states[n] == "programmed" for n in ("1", "2")}
-
-
-def device_count(raw: str | None) -> int | None:
-    return None if raw is None else len([line for line in raw.splitlines() if line.strip()])
+    return run_bounded(["ykman", *args])
 
 
 def number(pattern: str, raw: str) -> int | None:
@@ -101,28 +54,39 @@ def parse_piv(raw: str) -> dict:
             "slots": sorted(set(re.findall(r"^Slot ([0-9A-F]{2})\b", raw, re.MULTILINE)))}
 
 
+# Report section -> (read-only ykman arguments, parser of its output).
+SECTIONS = {
+    "device": (["info"], parse_device),
+    "fido": (["fido", "info"], parse_fido),
+    "openpgp": (["openpgp", "info"], parse_openpgp),
+    "piv": (["piv", "info"], parse_piv),
+    "otp": (["otp", "info"], parse_otp),
+}
+# Retry counters that lock an applet when they reach 0.
+COUNTERS = (("FIDO2_PIN", "fido", "pin_attempts"), ("OPENPGP_PIN", "openpgp", "pin_tries"),
+            ("OPENPGP_ADMIN_PIN", "openpgp", "admin_pin_tries"), ("PIV_PIN", "piv", "pin_tries"),
+            ("PIV_PUK", "piv", "puk_tries"))
+
+
+def field(report: dict, section: str, key: str):
+    """Value from a parsed section; None when the section was unreadable."""
+    return (report.get(section) or {}).get(key)
+
+
 def assess(report: dict) -> tuple[list[str], list[str]]:
-    """Blocking findings make the inventory NO-GO; advice never does."""
-    blocking, advice = [], []
-    fido, openpgp, piv = report["fido"], report["openpgp"], report["piv"]
-    for name in ("device", "fido", "openpgp", "piv", "otp"):
-        if report[name] is None:
-            blocking.append(f"{name.upper()}_UNREADABLE")
-    if fido and not fido["pin_set"]:
+    blocking = [f"{name.upper()}_UNREADABLE" for name in SECTIONS if report[name] is None]
+    advice = []
+    if field(report, "fido", "pin_set") is False:
         blocking.append("FIDO2_PIN_NOT_SET")
-    counters = [("FIDO2_PIN", fido and fido["pin_attempts"]),
-                ("OPENPGP_PIN", openpgp and openpgp["pin_tries"]),
-                ("OPENPGP_ADMIN_PIN", openpgp and openpgp["admin_pin_tries"]),
-                ("PIV_PIN", piv and piv["pin_tries"]),
-                ("PIV_PUK", piv and piv["puk_tries"])]
-    for name, value in counters:
+    for name, section, key in COUNTERS:
+        value = field(report, section, key)
         if value is not None and value <= 1:
             blocking.append(f"{name}_ALMOST_BLOCKED")
-    if piv and piv["default_credentials"]:
+    if field(report, "piv", "default_credentials"):
         blocking.append("PIV_DEFAULT_CREDENTIALS")
-    if openpgp and not openpgp["kdf_enabled"]:
+    if field(report, "openpgp", "kdf_enabled") is False:
         advice.append("OPENPGP_KDF_DISABLED")
-    apps = (report["device"] or {}).get("applications", {})
+    apps = field(report, "device", "applications") or {}
     if any(state["nfc"] for state in apps.values()):
         advice.append("NFC_ENABLED")
     if apps.get("Yubico OTP", {}).get("usb"):
@@ -131,30 +95,20 @@ def assess(report: dict) -> tuple[list[str], list[str]]:
 
 
 def snapshot() -> dict:
-    count = device_count(ykman(["list"]))
+    count = line_count(ykman(["list"]))
     report = {"mode": "YUBIKEY_APPLETS_READONLY", "device_count": count,
               "hardware_mutation_authorized": False}
     if count != 1:
-        report.update(status="NO-GO", blocking=["DEVICE_COUNT_NOT_ONE"], advice=[])
-        return report
-    report["role"] = device_role(ykman(["list", "--serials"]), os.environ.get("YUBIKEY_ROLES", ""))
-    parsers = {"device": parse_device, "fido": parse_fido, "openpgp": parse_openpgp, "piv": parse_piv,
-               "otp": parse_otp}
-    for name, args in COMMANDS.items():
+        return verdict(report, ["DEVICE_COUNT_NOT_ONE"], [])
+    report["role"] = yubikey_role()
+    for name, (args, parse) in SECTIONS.items():
         raw = ykman(args)
-        report[name] = parsers[name](raw) if raw is not None else None
-    blocking, advice = assess(report)
-    report.update(status="NO-GO" if blocking else "GO", blocking=blocking, advice=advice)
-    return report
+        report[name] = parse(raw) if raw is not None else None
+    return verdict(report, *assess(report))
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = sys.argv[1:] if argv is None else argv
-    if args:
-        print("No arguments supported", file=sys.stderr)
-        return 2
-    print(json.dumps(snapshot(), sort_keys=True))
-    return 0
+    return main_json(snapshot, argv)
 
 
 if __name__ == "__main__":
