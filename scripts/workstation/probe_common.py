@@ -95,5 +95,14 @@ def main_json(snapshot: Callable[[], dict], argv: list[str] | None = None) -> in
     if args:
         print("No arguments supported", file=sys.stderr)
         return 2
-    print(json.dumps(snapshot(), sort_keys=True))
+    try:
+        report = snapshot()
+        if not isinstance(report, dict):
+            raise TypeError("snapshot contract")
+    except Exception:
+        # Never emit exception messages: they may contain private paths or
+        # values from a user configuration. A failed probe is never a GO.
+        report = {"status": "NO-GO", "blocking": ["PROBE_EXCEPTION"],
+                  "advice": [], "hardware_mutation_authorized": False}
+    print(json.dumps(report, sort_keys=True))
     return 0
