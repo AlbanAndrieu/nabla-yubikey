@@ -40,3 +40,7 @@ tests/fixturés**, jamais par réécriture aveugle de l'historique Git.
 
 Voir [plan de migration](docs/migration.md). Le submodule dans
 `nabla-compose` sera étudié après une première release locale testée.
+
+## Roadmap de certificats PIV et HashiCorp Vault
+
+Voir [Vault PKI + YubiKey : architecture, inventaire P0, émission, révocation et récupération](docs/roadmap-vault-pki.md). **Projet documentaire uniquement** : aucun provisionnement automatique, aucune modification matérielle sans autorisation explicite.
