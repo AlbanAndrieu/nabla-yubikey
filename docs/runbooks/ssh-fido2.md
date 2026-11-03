@@ -88,7 +88,7 @@ ssh -O exit github.com; ssh -v -T github.com 2>&1 | grep -E 'Server accepts key|
 
 La dernière ligne `Server accepts key` doit nommer la clé `_sk` de la YubiKey branchée, jamais `id_ed25519`. Attesté le 31/10 avec la principale (la secondaire absente est sautée).
 
-La sonde lit `ssh -G`, l'environnement systemd utilisateur (seulement `SSH_ASKPASS` et `WAYLAND_DISPLAY`) et `git config --global` ; elle n'affiche ni chemin, ni clé, ni empreinte.
+La sonde lit `ssh -G`, l'environnement systemd utilisateur et celui du processus `gcr-ssh-agent` en cours (seulement `SSH_ASKPASS`, `WAYLAND_DISPLAY` et `DISPLAY`) et `git config --global` ; elle n'affiche ni chemin, ni clé, ni empreinte.
 
 ## Piège GNOME/Wayland : « agent refused operation »
 
@@ -104,7 +104,7 @@ systemctl --user set-environment SSH_ASKPASS=/usr/libexec/seahorse/ssh-askpass
 systemctl --user restart gcr-ssh-agent.service   # vide les clés chargées
 ```
 
-`just ssh-fido2-readonly` lit l'environnement du gestionnaire systemd, pas celui de l'agent : il ne détecte pas la course.
+`just ssh-fido2-readonly` détecte la course : un agent lancé sans `WAYLAND_DISPLAY` ni `DISPLAY` donne `AGENT_STARTED_WITHOUT_DISPLAY` (**NO-GO**).
 
 Contournement ponctuel sans agent : `SSH_AUTH_SOCK= SSH_ASKPASS_REQUIRE=never ssh …`.
 
