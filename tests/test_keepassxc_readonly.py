@@ -1,0 +1,226 @@
+"""Hermetic contracts: KeePassXC vault diagnosis without password or challenge."""
+from __future__ import annotations
+
+import io
+import json
+import struct
+import tempfile
+import unittest
+from contextlib import redirect_stdout
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from probe_loader import load_probe
+
+module = load_probe("inspect-keepassxc-readonly.py")
+
+AES = bytes.fromhex("31c1f2e6bf714350be5805216afc5aff")
+ARGON2D = bytes.fromhex("ef636ddf8c29444b91f7a9a403e30a0c")
+ARGON2ID = bytes.fromhex("9e298b1956db4773b23dfc3ec6f0a1e6")
+
+
+def entry(kind: int, key: str, value: bytes) -> bytes:
+    return bytes([kind]) + struct.pack("<I", len(key)) + key.encode() + struct.pack("<I", len(value)) + value
+
+
+def kdbx4(kdf: bytes = ARGON2D, memory_mib: int = 64) -> bytes:
+    params = (struct.pack("<H", 0x100) + entry(0x42, "$UUID", kdf)
+              + entry(0x05, "M", struct.pack("<Q", memory_mib * 1024 * 1024))
+              + entry(0x05, "I", struct.pack("<Q", 65)) + b"\x00")
+    fields = (bytes([2]) + struct.pack("<I", 16) + AES
+              + bytes([11]) + struct.pack("<I", len(params)) + params
+              + bytes([0]) + struct.pack("<I", 4) + b"\r\n\r\n")
+    return struct.pack("<IIHH", 0x9AA2D903, 0xB54BFB67, 1, 4) + fields + b"encrypted-payload"
+
+
+class Vault:
+    """Temporary home with Dropbox/vault.kdbx and a key file placed by the test."""
+
+    def __init__(self, header: bytes = kdbx4(), keyfile_dir: str = ".local/share/keepassxc",
+                 db_mode: int = 0o600, ini: str = "[SSHAgent]\nEnabled=true\n"):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name)
+        (self.home / "Dropbox").mkdir()
+        db = self.home / "Dropbox/vault.kdbx"
+        db.write_bytes(header)
+        db.chmod(db_mode)
+        (self.home / keyfile_dir).mkdir(parents=True, exist_ok=True)
+        key = self.home / keyfile_dir / "vault.key"
+        key.write_bytes(b"k" * 64)
+        key.chmod(0o600)
+        (self.home / ".config/keepassxc").mkdir(parents=True)
+        (self.home / ".config/keepassxc/keepassxc.ini").write_text(ini)
+
+    def snapshot(self, ykman_otp: str = "Slot 1: programmed\nSlot 2: programmed\n", devices: int = 1):
+        def run(command, **kwargs):
+            if command == ["ykman", "list", "--serials"]:
+                return SimpleNamespace(returncode=0, stdout="12345678\n" * devices)
+            if command[:2] == ["ykman", "list"]:
+                return SimpleNamespace(returncode=0, stdout="YubiKey 5 NFC Serial: 12345678\n" * devices)
+            return SimpleNamespace(returncode=0, stdout=ykman_otp)
+        out = io.StringIO()
+        with patch.object(module, "HOME", self.home), \
+             patch.object(module, "CLOUD_DIRS", (self.home / "Dropbox",)), \
+             patch.dict("os.environ", {}, clear=True), \
+             patch("shutil.which", return_value="/usr/bin/x"), \
+             patch("subprocess.run", side_effect=run), \
+             redirect_stdout(out):
+            module.main([])
+        return out.getvalue()
+
+    def close(self):
+        self.tmp.cleanup()
+
+
+class KeepassxcContracts(unittest.TestCase):
+    def report(self, vault: Vault, **kwargs) -> dict:
+        try:
+            raw = vault.snapshot(**kwargs)
+            self.assertNotIn(str(vault.home), raw)
+            self.assertNotIn("12345678", raw)
+            return json.loads(raw)
+        finally:
+            vault.close()
+
+    def test_header_parsed_without_password(self):
+        header = module.parse_header(kdbx4(ARGON2ID, 256))
+        self.assertEqual(header, {"version": "4.1", "cipher": "AES-256", "kdf": "Argon2id",
+                                  "memory_mib": 256, "iterations": 65})
+        self.assertIsNone(module.parse_header(b"not a vault"))
+        self.assertIsNone(module.parse_header(kdbx4()[:20]))
+
+    def test_go_with_advice_and_no_path_or_serial_leak(self):
+        report = self.report(Vault())
+        self.assertEqual(report["status"], "GO")
+        self.assertEqual(report["blocking"], [])
+        self.assertEqual(sorted(report["advice"]), ["KDF_MEMORY_BELOW_256MIB", "KDF_NOT_ARGON2ID"])
+        self.assertFalse(report["database_unlock_verified"])
+
+    def test_argon2id_256_has_no_kdf_advice(self):
+        report = self.report(Vault(header=kdbx4(ARGON2ID, 256)))
+        self.assertNotIn("KDF_NOT_ARGON2ID", report["advice"])
+        self.assertNotIn("KDF_MEMORY_BELOW_256MIB", report["advice"])
+
+    def test_keyfile_in_cloud_or_next_to_vault_is_blocking(self):
+        report = self.report(Vault(keyfile_dir="Dropbox"))
+        self.assertIn("KEYFILE_LEFT_IN_CLOUD", report["blocking"])
+        self.assertEqual(module.keyfile_location(Path("/v/db.kdbx"), Path("/v/db.key")), "WITH_DATABASE")
+        with patch.object(module, "CLOUD_DIRS", (Path("/cloud"),)):
+            self.assertEqual(module.keyfile_location(None, Path("/cloud/db.key")), "IN_CLOUD")
+        self.assertEqual(module.keyfile_location(Path("/v/db.kdbx"), Path("/v/db.key")), "WITH_DATABASE")
+
+    def test_world_readable_vault_and_missing_slot2_are_blocking(self):
+        report = self.report(Vault(db_mode=0o644))
+        self.assertIn("DATABASE_MODE_NOT_600", report["blocking"])
+        report = self.report(Vault(), ykman_otp="Slot 1: programmed\nSlot 2: empty\n")
+        self.assertIn("YUBIKEY_SLOT2_EMPTY", report["blocking"])
+        report = self.report(Vault(), devices=2)
+        self.assertIn("YUBIKEY_SLOT2_DEVICE_COUNT_2", report["blocking"])
+        report = self.report(Vault(), ykman_otp="Device busy\n")
+        self.assertIn("YUBIKEY_SLOT2_UNKNOWN", report["blocking"])
+
+    def test_corrupt_kdbx_metadata_fails_closed(self):
+        original = kdbx4(ARGON2ID, 256)
+        for raw in (original[:20], original.replace(b"\r\n\r\n", b"ABCD", 1),
+                    original.replace(ARGON2ID, b"\xff" * 16, 1)[:45]):
+            self.assertIsNone(module.parse_header(raw))
+        params = (struct.pack("<H", 0x100) + entry(0x42, "$UUID", ARGON2ID)
+                  + entry(0x42, "$UUID", ARGON2ID) + b"\x00")
+        self.assertIsNone(module.variant_dict(params))
+        self.assertIsNone(module.variant_dict(b"\x00\x01\x05\xff"))
+
+    def test_unknown_kdf_or_cipher_is_blocking_not_a_success(self):
+        unknown_kdf = kdbx4(b"\xff" * 16, 256)
+        report = self.report(Vault(header=unknown_kdf))
+        self.assertIn("KDF_UNREADABLE", report["blocking"])
+        self.assertEqual(report["status"], "NO-GO")
+        unknown_cipher = kdbx4(ARGON2ID, 256).replace(AES, b"\xee" * 16, 1)
+        report = self.report(Vault(header=unknown_cipher))
+        self.assertIn("CIPHER_UNREADABLE", report["blocking"])
+        self.assertEqual(report["status"], "NO-GO")
+
+    def test_newest_ignores_symlinks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            real = root / "real.kdbx"
+            real.write_bytes(kdbx4())
+            (root / "link.kdbx").symlink_to(real)
+            self.assertEqual(module.newest(root, "*.kdbx"), real)
+
+    def test_explicit_symlink_database_is_not_opened(self):
+        vault = Vault()
+        try:
+            alias = vault.home / "alias.kdbx"
+            alias.symlink_to(vault.home / "Dropbox/vault.kdbx")
+            key = vault.home / ".local/share/keepassxc/vault.key"
+            with patch.object(module, "HOME", vault.home), \
+                 patch.object(module, "CLOUD_DIRS", (vault.home / "Dropbox",)), \
+                 patch.dict("os.environ", {
+                     "KEEPASSXC_DB": str(alias),
+                     "KEEPASSXC_KEYFILE": str(key),
+                 }, clear=True), \
+                 patch.object(module, "yubikey_slot2", return_value="PROGRAMMED"), \
+                 patch("shutil.which", return_value="/usr/bin/x"):
+                report = module.snapshot()
+            self.assertIsNone(report["header"])
+            self.assertEqual(report["status"], "NO-GO")
+            self.assertIn("DATABASE_UNREADABLE", report["blocking"])
+        finally:
+            vault.close()
+
+    def test_crypto_fields_must_be_unique_and_match_kdbx_version(self):
+        original = kdbx4(ARGON2ID, 256)
+        cipher_field = bytes([2]) + struct.pack("<I", 16) + AES
+        self.assertIsNone(module.parse_header(original[:12] + cipher_field + original[12:]))
+        legacy_kdf = bytes([6]) + struct.pack("<I", 1) + b"\x00"
+        self.assertIsNone(module.parse_header(original[:12] + legacy_kdf + original[12:]))
+
+    def test_directory_with_mode_600_is_not_an_acceptable_keyfile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp) / "not-a-key.key"
+            directory.mkdir()
+            directory.chmod(0o600)
+            self.assertEqual(module.mode(directory), "UNSAFE_FILE_TYPE")
+            link = Path(tmp) / "link.key"
+            link.symlink_to(directory)
+            self.assertEqual(module.mode(link), "UNSAFE_FILE_TYPE")
+
+    def test_cloud_symlink_keyfile_is_counted_as_exposed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cloud = Path(tmp) / "Dropbox"
+            cloud.mkdir()
+            (cloud / "linked.key").symlink_to(Path(tmp) / "private.key")
+            with patch.object(module, "CLOUD_DIRS", (cloud,)):
+                self.assertEqual(module.cloud_keyfile_state(), "PRESENT")
+        report = self.report(Vault(keyfile_dir="Dropbox"))
+        self.assertTrue(report["cloud_keyfile_present"])
+        self.assertEqual(report["cloud_keyfile_scan"], "PRESENT")
+
+    def test_cloud_scan_failure_does_not_claim_no_keyfile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cloud = Path(tmp) / "Dropbox"
+            cloud.symlink_to(Path(tmp) / "missing")
+            with patch.object(module, "CLOUD_DIRS", (cloud,)):
+                self.assertEqual(module.cloud_keyfile_state(), "UNKNOWN")
+        findings, _ = module.assess({
+            "header": module.parse_header(kdbx4(ARGON2ID, 256)),
+            "database_mode": "600", "keyfile_mode": "600",
+            "keyfile_location": "SEPARATE", "cloud_keyfile_present": False,
+            "cloud_keyfile_scan": "UNKNOWN", "yubikey_slot2": "PROGRAMMED",
+            "keepassxc_ssh_agent": "ENABLED", "ssh_file_key_on_disk": False,
+        })
+        self.assertIn("CLOUD_KEYFILE_SCAN_UNKNOWN", findings)
+
+    def test_ssh_agent_disabled_is_advice(self):
+        report = self.report(Vault(ini="[SSHAgent]\nEnabled=false\n"))
+        self.assertIn("KEEPASSXC_SSH_AGENT_DISABLED", report["advice"])
+        self.assertEqual(report["status"], "GO")
+
+    def test_arguments_rejected(self):
+        with patch("sys.stderr", new=io.StringIO()):
+            self.assertEqual(module.main(["--unlock"]), 2)
+
+
+if __name__ == "__main__":
+    unittest.main()
