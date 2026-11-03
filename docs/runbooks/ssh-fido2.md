@@ -112,6 +112,21 @@ systemctl --user restart gcr-ssh-agent.service   # vide les clés chargées
 
 Contournement ponctuel sans agent : `SSH_AUTH_SOCK= SSH_ASKPASS_REQUIRE=never ssh …`.
 
+## Saisie du PIN
+
+Constaté les 03 et 04/11 : 6 PIN refusés via les fenêtres de l'agent, alors que le même PIN était accepté en terminal.
+
+- **Une seule clé branchée : le PIN part vers elle, quelle que soit la clé nommée.** Une fenêtre `Drx5…` (principale) avec la secondaire seule consomme un essai de la secondaire. Annuler toute fenêtre qui nomme une clé absente : annuler ne coûte aucun essai.
+- Saisir le PIN en terminal plutôt que dans la fenêtre seahorse, après l'avoir tapé une fois en clair (chiffres AZERTY : Maj ou pavé numérique).
+- Taper le PIN et toucher la clé en moins de 2 minutes : au-delà, GitHub coupe (`Received disconnect … Bye Bye`), sans perte d'essai.
+- Ouvrir la connexion GitHub du jour sans agent et avec une seule clé, puis pousser par elle :
+
+```bash
+SSH_AUTH_SOCK= ssh -F /dev/null -o IdentitiesOnly=yes -o ControlMaster=auto -o 'ControlPath=~/.ssh/cm-%r@%h:%p' -o ControlPersist=8h -i ~/.ssh/id_ed25519_sk -T git@github.com
+```
+
+- Compteur bas : `ykman fido access verify-pin`, clé seule branchée ; un PIN correct le remet à 8. Si le PIN est refusé, s'arrêter et le retrouver avant tout autre essai.
+
 ## Vérification
 
 ```bash

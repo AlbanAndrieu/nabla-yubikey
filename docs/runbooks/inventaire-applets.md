@@ -54,9 +54,9 @@ Ne pas désactiver une application sans inventaire de ses usages : FIDO U2F/FIDO
 | Clé | Date | État |
 | --- | --- | --- |
 | Secondaire | 04/11/2026 | appliqué, sonde **GO**, PIN FIDO2 inchangé |
-| Principale | — | YubiHSM Auth déjà désactivé (USB et NFC) ; NFC **pas encore restreint** |
+| Principale | 04/11/2026 | appliqué avec `ykman --device <série>` (deux clés branchées) ; YubiHSM Auth était déjà désactivé ; sonde à rejouer seule branchée |
 
-Une clé à la fois, seule branchée :
+Une clé à la fois, seule branchée (ou ciblée par `ykman --device <série>`) :
 
 ```bash
 ykman config usb --disable HSMAUTH --force
