@@ -1,6 +1,7 @@
 # Runbook — inventaire des applets YubiKey (lecture seule)
 
 > **Attesté le 31/10/2026** sur Workstation (YubiKey 5 NFC, firmware 5.4.3) : **GO**, aucun bloquant, trois conseils.
+> **04/11/2026, secondaire** : **GO** après la configuration ci-dessous ; les trois conseils restent affichés (voir [Configuration appliquée](#configuration-appliquée)).
 
 ```bash
 just applets-readonly
@@ -32,7 +33,36 @@ Chaque correction est une **écriture matérielle** : décision explicite, comma
 | Code | Risque | Correction possible |
 | --- | --- | --- |
 | `OTP_USB_ENABLED` | Un effleurement tape une chaîne OTP dans la fenêtre active | `ykman config usb --disable OTP` si Yubico OTP n'est pas utilisé |
-| `NFC_ENABLED` | Applets joignables sans contact par un lecteur proche | `ykman config nfc --disable-all` si le NFC (téléphone) n'est pas utilisé |
+| `NFC_ENABLED` | Applets joignables sans contact par un lecteur proche | Restreindre le NFC aux usages du téléphone (voir ci-dessous), ou `ykman config nfc --disable-all` si le NFC n'est pas utilisé ; le conseil reste tant qu'**une** application est ouverte en NFC |
 | `OPENPGP_KDF_DISABLED` | Le PIN OpenPGP transite en clair vers la carte | `kdf-setup` dans `gpg --card-edit` (mode admin), **avant** de charger des clés ; vérifier la documentation GnuPG/Yubico sur la réinitialisation des PIN avant de le lancer |
 
-Ne pas désactiver une application sans inventaire de ses usages : FIDO U2F/FIDO2 (SSH-sk, WebAuthn), OpenPGP (signature des commits si la clé est sur carte), PIV (slot `9A` occupé sur la clé attestée), OATH (codes TOTP de Yubico Authenticator).
+Ne pas désactiver une application sans inventaire de ses usages : FIDO U2F/FIDO2 (SSH-sk, WebAuthn), OpenPGP (signature des commits si la clé est sur carte), PIV (slot `9A` occupé sur la clé attestée), OATH (codes TOTP de Yubico Authenticator), Yubico OTP (slot 1 : Vaultwarden, lisible en NFC par Bitwarden mobile ; slot 2 : challenge-response KeePassXC, USB seulement), YubiHSM Auth (identifiants pour un YubiHSM 2, aucun ici).
+
+## Configuration appliquée
+
+Écritures sans PIN, réversibles, décidées par le titulaire. La clé redémarre après chaque `ykman config`.
+
+| Application | USB | NFC | Pourquoi |
+| --- | --- | --- | --- |
+| Yubico OTP | oui | oui | Vaultwarden (slot 1, lisible en NFC par Bitwarden mobile) ; KeePassXC (slot 2) |
+| FIDO U2F / FIDO2 | oui | oui | SSH-sk, passkeys sur le poste et le téléphone |
+| OATH | oui | oui | codes TOTP de Yubico Authenticator (poste et téléphone) |
+| PIV | oui | **non** | slot `9A` utilisé en USB seulement ; en NFC, un lecteur proche lisait le certificat et pouvait épuiser les essais de PIN |
+| OpenPGP | oui | **non** | carte utilisée en USB seulement ; même raison qu'au-dessus |
+| YubiHSM Auth | **non** | **non** | aucun YubiHSM 2 ; déjà désactivé sur la principale |
+
+| Clé | Date | État |
+| --- | --- | --- |
+| Secondaire | 04/11/2026 | appliqué, sonde **GO**, PIN FIDO2 inchangé |
+| Principale | — | YubiHSM Auth déjà désactivé (USB et NFC) ; NFC **pas encore restreint** |
+
+Une clé à la fois, seule branchée :
+
+```bash
+ykman config usb --disable HSMAUTH --force
+ykman config nfc --disable HSMAUTH --disable PIV --disable OPENPGP --force
+ykman info        # colonnes USB / NFC du tableau ci-dessus
+just applets-readonly
+```
+
+Retour arrière : `ykman config nfc --enable PIV --enable OPENPGP --force` et `ykman config usb --enable HSMAUTH --force` (puis `nfc --enable HSMAUTH`).
