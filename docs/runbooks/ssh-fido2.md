@@ -106,7 +106,9 @@ systemctl --user restart gcr-ssh-agent.service   # vide les clés chargées
 
 `just ssh-fido2-readonly` détecte la course : un agent lancé sans `WAYLAND_DISPLAY` ni `DISPLAY` donne `AGENT_STARTED_WITHOUT_DISPLAY` (**NO-GO**).
 
-**Fetch en arrière-plan (constaté le 03/11)** : `BatchMode=yes` n'empêche pas l'agent d'ouvrir la fenêtre de PIN. Un `git fetch` automatique (ici l'application Claude, toutes les ~10 min) l'ouvre donc, et l'agent reste bloqué pour tous les clients jusqu'à la réponse. Une fois la connexion maîtresse GitHub ouverte (un PIN et un toucher, `ControlPersist 8h`), ces fetch passent sans fenêtre. Sinon, annuler la fenêtre : aucun essai de PIN n'est consommé. Retrouver l'origine : `pgrep -a -x ssh`, puis remonter les parents.
+**Fetch en arrière-plan (constaté le 03/11)** : `BatchMode=yes` n'empêche pas l'agent d'ouvrir la fenêtre de PIN. Un `git fetch` automatique (ici l'application Claude, toutes les ~10 min) l'ouvre donc, et l'agent reste bloqué pour tous les clients jusqu'à la réponse. Retrouver l'origine : `pgrep -a -x ssh`, puis remonter les parents. Annuler une fenêtre ne consomme aucun essai de PIN.
+
+**Choix du 03/11 : la YubiKey pour le push seulement.** Dans `~/.gitconfig` (dotfiles), `url."https://github.com/".insteadOf` envoie les fetch en HTTPS avec le jeton `gh` (`credential."https://github.com".helper = !gh auth git-credential`), et `url."git@github.com:".pushInsteadOf` renvoie les push en SSH. Contrôle sans réseau : `git remote get-url origin` donne `https://…`, `git remote get-url --push origin` donne `git@github.com:…`.
 
 Contournement ponctuel sans agent : `SSH_AUTH_SOCK= SSH_ASKPASS_REQUIRE=never ssh …`.
 
