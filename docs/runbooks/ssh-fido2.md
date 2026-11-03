@@ -92,14 +92,19 @@ La sonde lit `ssh -G`, l'environnement systemd utilisateur (seulement `SSH_ASKPA
 
 ## Piège GNOME/Wayland : « agent refused operation »
 
-`gcr-ssh-agent` demande le PIN via `/usr/bin/ssh-askpass` (`x11-ssh-askpass`), qui ne peut pas saisir le clavier sous Wayland et renvoie un PIN vide. Le compteur FIDO2 n'est pas décrémenté.
+Deux causes envoient un PIN vide ; le compteur FIDO2 n'est pas décrémenté, et le journal (`journalctl --user -u gcr-ssh-agent`) affiche `sshkey_sign: incorrect passphrase supplied to decrypt private key` :
+
+- `gcr-ssh-agent` demande le PIN via `/usr/bin/ssh-askpass` (`x11-ssh-askpass`), qui ne peut pas saisir le clavier sous Wayland.
+- **Course au démarrage (constatée le 03/11)** : le socket a lancé `gcr-ssh-agent` avant que GNOME exporte `WAYLAND_DISPLAY`. Sans `DISPLAY` ni `WAYLAND_DISPLAY`, `ssh-agent` n'appelle pas askpass. Contrôle : `tr '\0' '\n' < /proc/$(systemctl --user show -p MainPID --value gcr-ssh-agent.service)/environ | grep WAYLAND_DISPLAY` doit répondre.
 
 ```bash
 mkdir -p ~/.config/environment.d
-printf 'SSH_ASKPASS=/usr/libexec/seahorse/ssh-askpass\n' > ~/.config/environment.d/50-ssh-askpass.conf
+printf 'SSH_ASKPASS=/usr/libexec/seahorse/ssh-askpass\nWAYLAND_DISPLAY=wayland-0\n' > ~/.config/environment.d/50-ssh-askpass.conf
 systemctl --user set-environment SSH_ASKPASS=/usr/libexec/seahorse/ssh-askpass
 systemctl --user restart gcr-ssh-agent.service   # vide les clés chargées
 ```
+
+`just ssh-fido2-readonly` lit l'environnement du gestionnaire systemd, pas celui de l'agent : il ne détecte pas la course.
 
 Contournement ponctuel sans agent : `SSH_AUTH_SOCK= SSH_ASKPASS_REQUIRE=never ssh …`.
 
