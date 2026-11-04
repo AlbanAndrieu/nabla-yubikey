@@ -125,7 +125,7 @@ Constaté les 03 et 04/11 : 6 PIN refusés via les fenêtres de l'agent, alors q
 SSH_AUTH_SOCK= ssh -F /dev/null -o IdentitiesOnly=yes -o ControlMaster=auto -o 'ControlPath=~/.ssh/cm-%r@%h:%p' -o ControlPersist=8h -i ~/.ssh/id_ed25519_sk -T git@github.com
 ```
 
-- Compteur bas : `ykman fido access verify-pin`, clé seule branchée ; un PIN correct le remet à 8. Si le PIN est refusé, s'arrêter et le retrouver avant tout autre essai.
+- Compteur bas : `ykman fido access verify-pin`, clé seule branchée, ou `ykman --device <série> fido access verify-pin` avec les deux ; un PIN correct le remet à 8. Si le PIN est refusé, s'arrêter et le retrouver avant tout autre essai.
 
 ## Vérification
 
