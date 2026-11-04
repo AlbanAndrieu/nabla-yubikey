@@ -24,11 +24,17 @@
 ## Avant de commencer
 
 - **Code de récupération 2FA** : *Paramètres → Sécurité → Connexion en deux étapes → Afficher le code de récupération*, à ranger dans KeePassXC et dans l'archive hors ligne. Seul recours si les deux clés sont perdues.
-- **Adresse** : WebAuthn lie la clé au domaine de `DOMAIN`, ici le nom public en HTTPS (relu par `/api/config` le 04/11). L'alias interne `.int` est servi en HTTP sur le port de l'app TrueNAS. Le navigateur y refuse WebAuthn, d'abord parce qu'il n'est pas en HTTPS, ensuite parce que ce n'est pas le domaine de `DOMAIN`. Avant de retirer l'OTP, choisir :
-  - soit pointer vers l'adresse de `DOMAIN` les clients qui doivent se connecter ;
-  - soit servir l'alias interne en HTTPS et en faire le `DOMAIN` (changement dans `nabla-compose`), le nom public perdant alors WebAuthn.
+- **Adresse, décidée le 04/11** : une seule, le nom public en HTTPS, celui de `DOMAIN` (relu par `/api/config`). Elle sert à :
+  - la connexion WebAuthn avec les YubiKey et l'accès aux secrets ;
+  - les clients locaux, services TrueNAS et workstation, qui y migrent leurs secrets.
 
-  Un client déjà connecté continue de synchroniser et de déverrouiller : le second facteur n'est demandé qu'à la connexion.
+  Depuis le LAN, elle passe par le tunnel Cloudflare : `200` depuis la workstation et depuis TrueNAS le 04/11.
+
+  Clients relevés le 04/11 : `bw` (workstation et TrueNAS) et l'application de bureau pointent déjà sur ce nom ; l'extension navigateur et Bitwarden mobile restent à vérifier.
+
+  Les services TrueNAS lisent avec leur compte dédié (voir `nabla-compose`, `docs/vaultwarden-truenas-dococd-account.md`), pas avec le compte personnel protégé par les YubiKey.
+
+  L'alias interne `.int`, servi en HTTP sur le port de l'app TrueNAS, ne porte pas WebAuthn : le navigateur le refuse hors HTTPS, et ce n'est pas le domaine de `DOMAIN`. Un client déjà connecté continue de synchroniser et de déverrouiller : le second facteur n'est demandé qu'à la connexion.
 - **CLI** : `bw login` ne propose pas WebAuthn. Avant de retirer l'OTP, choisir `bw login --apikey` (clé d'API personnelle, *Paramètres → Sécurité → Clés* ; elle remplace le second facteur pour la CLI, la ranger dans `pass`) ou garder l'OTP. `bw unlock` et `bw-unlock` ne demandent pas de second facteur.
 
 ## Étapes
