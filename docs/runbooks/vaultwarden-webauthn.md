@@ -24,12 +24,16 @@
 ## Avant de commencer
 
 - **Code de récupération 2FA** : *Paramètres → Sécurité → Connexion en deux étapes → Afficher le code de récupération*, à ranger dans KeePassXC et dans l'archive hors ligne. Seul recours si les deux clés sont perdues.
-- Ouvrir Vaultwarden **uniquement par l'URL de `DOMAIN`** (compose Vaultwarden) : WebAuthn lie la clé à ce domaine, une autre adresse (IP du LAN, nom local) la refuse.
+- **Adresse** : WebAuthn lie la clé au domaine de `DOMAIN`, ici le nom public en HTTPS (relu par `/api/config` le 04/11). L'alias interne `.int` est servi en HTTP sur le port de l'app TrueNAS. Le navigateur y refuse WebAuthn, d'abord parce qu'il n'est pas en HTTPS, ensuite parce que ce n'est pas le domaine de `DOMAIN`. Avant de retirer l'OTP, choisir :
+  - soit pointer vers l'adresse de `DOMAIN` les clients qui doivent se connecter ;
+  - soit servir l'alias interne en HTTPS et en faire le `DOMAIN` (changement dans `nabla-compose`), le nom public perdant alors WebAuthn.
+
+  Un client déjà connecté continue de synchroniser et de déverrouiller : le second facteur n'est demandé qu'à la connexion.
 - **CLI** : `bw login` ne propose pas WebAuthn. Avant de retirer l'OTP, choisir `bw login --apikey` (clé d'API personnelle, *Paramètres → Sécurité → Clés* ; elle remplace le second facteur pour la CLI, la ranger dans `pass`) ou garder l'OTP. `bw unlock` et `bw-unlock` ne demandent pas de second facteur.
 
 ## Étapes
 
-1. **Principale** : *Connexion en deux étapes → FIDO2 WebAuthn → Gérer*, mot de passe maître, nom `principale`, *Lire la clé*, toucher la clé, *Enregistrer*. Si la liste contient déjà une clé, c'est peut-être la secondaire (identifiant « Bitwarden » relevé le 31/10) : la tester avant d'en ajouter une.
+1. **Principale** : *Connexion en deux étapes → FIDO2 WebAuthn → Gérer*, mot de passe maître, nom `principale`, *Lire la clé*, toucher la clé, *Enregistrer*. Si la liste contient déjà une clé, c'est sans doute la secondaire : l'identifiant « Bitwarden » relevé le 31/10 est ce Vaultwarden (pas de compte bitwarden.com). La tester avant d'en ajouter une. Si elle a été enregistrée sur l'alias interne, elle ne vaut pas pour le domaine de `DOMAIN` : la retirer et réenregistrer la secondaire à l'étape 2.
 2. **Secondaire** : même chose, nom `secondaire`, en touchant la secondaire.
 3. **Tests**, avec chaque clé seule, dans une fenêtre privée, puis dans l'extension, l'application de bureau et Bitwarden mobile (NFC, ou USB-C pour la principale). Choisir WebAuthn à la connexion et toucher la clé.
 4. **Retirer l'OTP de Vaultwarden** (*YubiKey OTP → Gérer → Désactiver*) seulement quand l'étape 3 passe partout. Retirer aussi `YUBICO_CLIENT_ID` et `YUBICO_SECRET_KEY` s'ils sont réglés (environnement ou `/admin`).
