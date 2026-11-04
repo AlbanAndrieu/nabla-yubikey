@@ -47,7 +47,8 @@ Voir [roadmap priorisée](docs/roadmap.md), [plan de migration](docs/migration.m
 [runbook SSH FIDO2](docs/runbooks/ssh-fido2.md) et
 [inventaire des applets](docs/runbooks/inventaire-applets.md),
 [coffre KeePassXC](docs/runbooks/keepassxc.md),
-[sous-clé OpenPGP de `pass`](docs/runbooks/openpgp-sous-cle.md). Le submodule dans
+[sous-clé OpenPGP de `pass`](docs/runbooks/openpgp-sous-cle.md),
+[WebAuthn dans Vaultwarden](docs/runbooks/vaultwarden-webauthn.md). Le submodule dans
 `nabla-compose` sera étudié après une première release locale testée.
 
 ## Roadmap de certificats PIV et HashiCorp Vault
