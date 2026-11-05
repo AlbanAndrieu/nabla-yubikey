@@ -7,7 +7,7 @@ import subprocess
 import unittest
 from contextlib import redirect_stdout
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import mock_open, patch
 
 from probe_loader import load_probe
 
@@ -24,16 +24,17 @@ def fake_run(outputs):
         if command[:2] == ["ssh", "-G"]:
             return SimpleNamespace(returncode=0, stdout=outputs[command[2]])
         if command[0] == "systemctl":
-            return SimpleNamespace(returncode=0, stdout=outputs["systemctl"])
+            return SimpleNamespace(returncode=0, stdout=outputs["mainpid" if "MainPID" in command else "systemctl"])
         return SimpleNamespace(returncode=0, stdout=outputs[command[-1]])
     return run
 
 
-def snapshot_with(**overrides):
+def snapshot_with(proc_environ=b"", **overrides):
     outputs = {"github.com": GITHUB, "truenas": SERVER, "pfsense": SERVER,
-               "systemctl": AGENT_ENV, **SIGNING, **overrides}
+               "systemctl": AGENT_ENV, "mainpid": "0\n", **SIGNING, **overrides}
     with patch("shutil.which", return_value="/usr/bin/x"), \
-         patch("subprocess.run", side_effect=fake_run(outputs)):
+         patch("subprocess.run", side_effect=fake_run(outputs)), \
+         patch.object(module, "open", mock_open(read_data=proc_environ), create=True):
         return module.snapshot()
 
 
@@ -78,12 +79,12 @@ class SshFido2Contracts(unittest.TestCase):
 
     def test_askpass_x11_under_wayland_is_blocking(self):
         wayland = {"WAYLAND_DISPLAY": "wayland-0"}
-        self.assertEqual(module.askpass_state(wayland), "X11_ASKPASS_UNDER_WAYLAND")
-        self.assertEqual(module.askpass_state({**wayland, "SSH_ASKPASS": "/usr/bin/ssh-askpass"}),
+        self.assertEqual(module.askpass_state(wayland, None), "X11_ASKPASS_UNDER_WAYLAND")
+        self.assertEqual(module.askpass_state({**wayland, "SSH_ASKPASS": "/usr/bin/ssh-askpass"}, None),
                          "X11_ASKPASS_UNDER_WAYLAND")
-        self.assertEqual(module.askpass_state({**wayland, "SSH_ASKPASS": "/usr/libexec/seahorse/ssh-askpass"}),
+        self.assertEqual(module.askpass_state({**wayland, "SSH_ASKPASS": "/usr/libexec/seahorse/ssh-askpass"}, None),
                          "CONFIGURED_UNVERIFIED")
-        self.assertEqual(module.askpass_state({}), "NOT_WAYLAND_UNVERIFIED")
+        self.assertEqual(module.askpass_state({}, None), "NOT_WAYLAND_UNVERIFIED")
 
     def test_commit_signing(self):
         with patch.object(module, "git_config", side_effect=["true", ""]):
@@ -95,13 +96,38 @@ class SshFido2Contracts(unittest.TestCase):
         with patch.object(module, "git_config", return_value=None):
             self.assertEqual(module.commit_signing_state(), "UNKNOWN")
 
-    def test_agent_environment_keeps_only_askpass_variables(self):
+    def test_session_environment_keeps_only_askpass_variables(self):
         with patch("shutil.which", return_value="/usr/bin/systemctl"), \
              patch("subprocess.run",
                           return_value=SimpleNamespace(returncode=0, stdout=AGENT_ENV)) as run:
-            env = module.agent_environment()
+            env = module.session_environment()
         self.assertEqual(run.call_args.args[0], ["systemctl", "--user", "show-environment"])
         self.assertEqual(set(env), {"SSH_ASKPASS", "WAYLAND_DISPLAY"})
+
+    def test_running_agent_started_without_display_is_blocking(self):
+        # Seen on 03/11: the socket started gcr-ssh-agent before GNOME exported WAYLAND_DISPLAY.
+        no_display = b"HOME=/home/u\0SSH_ASKPASS=/usr/libexec/seahorse/ssh-askpass\0GITHUB_TOKEN=x\0"
+        report = snapshot_with(proc_environ=no_display, mainpid="4418\n")
+        self.assertEqual(report["agent_askpass"], "STARTED_WITHOUT_DISPLAY")
+        self.assertIn("AGENT_STARTED_WITHOUT_DISPLAY", report["blocking"])
+        self.assertNotIn("GITHUB_TOKEN", json.dumps(report))
+        report = snapshot_with(proc_environ=no_display + b"WAYLAND_DISPLAY=wayland-0\0", mainpid="4418\n")
+        self.assertEqual(report["status"], "GO")
+
+    def test_agent_process_environment_fails_closed(self):
+        def agent_env(mainpid, **opener):
+            with patch("shutil.which", return_value="/usr/bin/systemctl"), \
+                 patch("subprocess.run", return_value=SimpleNamespace(returncode=0, stdout=mainpid)), \
+                 patch.object(module, "open", create=True, **opener) as opened:
+                return module.agent_environment(), opened
+        env, opened = agent_env("4418\n", new=mock_open(read_data=b"DISPLAY=:0\0"))
+        self.assertEqual(env, {"DISPLAY": ":0"})
+        opened.assert_called_once_with("/proc/4418/environ", "rb")
+        self.assertIsNone(agent_env("0\n", new=mock_open())[0])
+        self.assertEqual(agent_env("x\n", new=mock_open())[0], {"_probe_error": "UNREADABLE"})
+        self.assertEqual(agent_env("4418\n", side_effect=PermissionError)[0], {"_probe_error": "UNREADABLE"})
+        self.assertEqual(agent_env("4418\n", new=mock_open(read_data=b"x" * 70000))[0],
+                         {"_probe_error": "INVALID"})
 
     def test_file_key_offered_to_servers(self):
         self.assertEqual(module.file_key_offered({"identityfile": ["a_sk", "b"]}), "FILE_KEY_OFFERED")
@@ -110,7 +136,7 @@ class SshFido2Contracts(unittest.TestCase):
 
     def test_snapshot_go_without_paths_or_other_variables(self):
         outputs = {"github.com": GITHUB, "truenas": SERVER, "pfsense": SERVER,
-                   "systemctl": AGENT_ENV, **SIGNING}
+                   "systemctl": AGENT_ENV, "mainpid": "0\n", **SIGNING}
         out = io.StringIO()
         with patch("shutil.which", return_value="/usr/bin/x"), \
              patch("subprocess.run", side_effect=fake_run(outputs)), \
@@ -179,8 +205,8 @@ class SshFido2Contracts(unittest.TestCase):
 
     def test_unreadable_or_duplicate_agent_environment_is_blocking(self):
         with patch("shutil.which", return_value=None):
-            self.assertEqual(module.agent_environment(), {"_probe_error": "UNREADABLE"})
-        self.assertEqual(module.askpass_state({"_probe_error": "DUPLICATE"}), "UNKNOWN")
+            self.assertEqual(module.session_environment(), {"_probe_error": "UNREADABLE"})
+        self.assertEqual(module.askpass_state({"_probe_error": "DUPLICATE"}, None), "UNKNOWN")
         for env in (AGENT_ENV + "SSH_ASKPASS=/usr/bin/ssh-askpass\n",
                     AGENT_ENV + "WAYLAND_DISPLAY=wayland-1\n"):
             report = snapshot_with(systemctl=env)

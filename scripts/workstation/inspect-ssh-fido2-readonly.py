@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Check the SSH FIDO2 key split from local configuration only.
 
-Uses `ssh -G` (no connection), the systemd user environment and git config.
+Uses `ssh -G` (no connection), the systemd user environment, the askpass
+variables of the running gcr-ssh-agent process and git config.
 Never contacts the agent, the YubiKey or a remote host, never asks for a PIN
 and never prints key material, fingerprints or paths.
 """
@@ -14,6 +15,8 @@ from probe_common import main_json, run_bounded, verdict
 
 GIT_HOST = "github.com"
 SERVER_HOSTS = ("truenas", "pfsense")
+AGENT_UNIT = "gcr-ssh-agent.service"
+ASKPASS_KEYS = ("SSH_ASKPASS", "WAYLAND_DISPLAY", "DISPLAY")
 
 
 def read_metadata(command: list[str]) -> str | None:
@@ -21,7 +24,8 @@ def read_metadata(command: list[str]) -> str | None:
     permitted = (
         command[:2] == ["ssh", "-G"] and len(command) == 3
         and command[2] in (GIT_HOST, *SERVER_HOSTS)
-    ) or command == ["systemctl", "--user", "show-environment"] or (
+    ) or command in (["systemctl", "--user", "show-environment"],
+                     ["systemctl", "--user", "show", "-p", "MainPID", "--value", AGENT_UNIT]) or (
         command[:4] == ["git", "config", "--global", "--get"]
         and len(command) == 5 and command[4] in ("commit.gpgsign", "gpg.format")
     )
@@ -80,14 +84,10 @@ def forward_agent(options: dict[str, list[str]] | None) -> str:
     return "UNKNOWN"
 
 
-def agent_environment() -> dict[str, str]:
-    """Read only the SSH askpass metadata, never echo the full environment."""
-    result = read_metadata(["systemctl", "--user", "show-environment"])
-    if result is None:
-        return {"_probe_error": "UNREADABLE"}
-    wanted = ("SSH_ASKPASS", "WAYLAND_DISPLAY")
-    pairs = [line.partition("=") for line in result.splitlines()]
-    selected = [(key, value) for key, sep, value in pairs if sep and key in wanted]
+def select_askpass(lines: list[str]) -> dict[str, str]:
+    """Keep only the askpass variables, never echo the full environment."""
+    pairs = [line.partition("=") for line in lines]
+    selected = [(key, value) for key, sep, value in pairs if sep and key in ASKPASS_KEYS]
     if any(len(value) > 4096 for _, value in selected):
         return {"_probe_error": "INVALID"}
     if len({key for key, _ in selected}) != len(selected):
@@ -95,13 +95,42 @@ def agent_environment() -> dict[str, str]:
     return dict(selected)
 
 
-def askpass_state(env: dict[str, str]) -> str:
-    """x11-ssh-askpass cannot grab the keyboard under Wayland and sends an empty PIN."""
-    if env.get("_probe_error"):
+def session_environment() -> dict[str, str]:
+    result = read_metadata(["systemctl", "--user", "show-environment"])
+    if result is None:
+        return {"_probe_error": "UNREADABLE"}
+    return select_askpass(result.splitlines())
+
+
+def agent_environment() -> dict[str, str] | None:
+    """A running agent keeps its start-time environment; None means socket activation starts a fresh one."""
+    pid = read_metadata(["systemctl", "--user", "show", "-p", "MainPID", "--value", AGENT_UNIT])
+    pid = "" if pid is None else pid.strip()
+    if not (pid.isascii() and pid.isdigit()):
+        return {"_probe_error": "UNREADABLE"}
+    if int(pid) == 0:
+        return None
+    try:
+        with open(f"/proc/{int(pid)}/environ", "rb") as handle:
+            raw = handle.read(65537)
+    except OSError:
+        return {"_probe_error": "UNREADABLE"}
+    if len(raw) > 65536:
+        return {"_probe_error": "INVALID"}
+    return select_askpass(raw.decode("utf-8", "replace").split("\0"))
+
+
+def askpass_state(session: dict[str, str], agent: dict[str, str] | None) -> str:
+    """Empty FIDO2 PIN: x11-ssh-askpass under Wayland, or an agent started before the display was exported."""
+    env = session if agent is None else agent
+    if session.get("_probe_error") or env.get("_probe_error"):
         return "UNKNOWN"
-    askpass = env.get("SSH_ASKPASS", "")
-    if not env.get("WAYLAND_DISPLAY"):
+    if not session.get("WAYLAND_DISPLAY"):
         return "NOT_WAYLAND_UNVERIFIED"
+    # ssh-agent runs askpass only when it sees a display.
+    if not env.get("WAYLAND_DISPLAY") and not env.get("DISPLAY"):
+        return "STARTED_WITHOUT_DISPLAY"
+    askpass = env.get("SSH_ASKPASS", "")
     if not askpass or "x11-ssh-askpass" in askpass or askpass == "/usr/bin/ssh-askpass":
         return "X11_ASKPASS_UNDER_WAYLAND"
     return "CONFIGURED_UNVERIFIED"
@@ -136,7 +165,7 @@ def assess(report: dict) -> list[str]:
             blocking.append(f"{host.upper()}_{report['server_identity'][host]}")
         if report["server_agent_forwarding"][host] != "NOT_FORWARDED":
             blocking.append(f"{host.upper()}_{report['server_agent_forwarding'][host]}")
-    if report["agent_askpass"] in ("X11_ASKPASS_UNDER_WAYLAND", "UNKNOWN"):
+    if report["agent_askpass"] not in ("CONFIGURED_UNVERIFIED", "NOT_WAYLAND_UNVERIFIED"):
         blocking.append(f"AGENT_{report['agent_askpass']}")
     if report["commit_signing"] != "OPENPGP":
         blocking.append(f"COMMIT_SIGNING_{report['commit_signing']}")
@@ -152,7 +181,7 @@ def snapshot() -> dict:
         "github_file_key": file_key_offered(github_options),
         "server_identity": {host: file_key_offered(opts) for host, opts in servers.items()},
         "server_agent_forwarding": {host: forward_agent(opts) for host, opts in servers.items()},
-        "agent_askpass": askpass_state(agent_environment()),
+        "agent_askpass": askpass_state(session_environment(), agent_environment()),
         "commit_signing": commit_signing_state(),
         "ssh_fido_login_verified": False,
         "hardware_mutation_authorized": False,

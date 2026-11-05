@@ -88,20 +88,44 @@ ssh -O exit github.com; ssh -v -T github.com 2>&1 | grep -E 'Server accepts key|
 
 La dernière ligne `Server accepts key` doit nommer la clé `_sk` de la YubiKey branchée, jamais `id_ed25519`. Attesté le 31/10 avec la principale (la secondaire absente est sautée).
 
-La sonde lit `ssh -G`, l'environnement systemd utilisateur (seulement `SSH_ASKPASS` et `WAYLAND_DISPLAY`) et `git config --global` ; elle n'affiche ni chemin, ni clé, ni empreinte.
+La sonde lit `ssh -G`, l'environnement systemd utilisateur et celui du processus `gcr-ssh-agent` en cours (seulement `SSH_ASKPASS`, `WAYLAND_DISPLAY` et `DISPLAY`) et `git config --global` ; elle n'affiche ni chemin, ni clé, ni empreinte.
 
 ## Piège GNOME/Wayland : « agent refused operation »
 
-`gcr-ssh-agent` demande le PIN via `/usr/bin/ssh-askpass` (`x11-ssh-askpass`), qui ne peut pas saisir le clavier sous Wayland et renvoie un PIN vide. Le compteur FIDO2 n'est pas décrémenté.
+Deux causes envoient un PIN vide ; le compteur FIDO2 n'est pas décrémenté, et le journal (`journalctl --user -u gcr-ssh-agent`) affiche `sshkey_sign: incorrect passphrase supplied to decrypt private key` :
+
+- `gcr-ssh-agent` demande le PIN via `/usr/bin/ssh-askpass` (`x11-ssh-askpass`), qui ne peut pas saisir le clavier sous Wayland.
+- **Course au démarrage (constatée le 03/11)** : le socket a lancé `gcr-ssh-agent` avant que GNOME exporte `WAYLAND_DISPLAY`. Sans `DISPLAY` ni `WAYLAND_DISPLAY`, `ssh-agent` n'appelle pas askpass. Contrôle : `tr '\0' '\n' < /proc/$(systemctl --user show -p MainPID --value gcr-ssh-agent.service)/environ | grep WAYLAND_DISPLAY` doit répondre.
 
 ```bash
 mkdir -p ~/.config/environment.d
-printf 'SSH_ASKPASS=/usr/libexec/seahorse/ssh-askpass\n' > ~/.config/environment.d/50-ssh-askpass.conf
+printf 'SSH_ASKPASS=/usr/libexec/seahorse/ssh-askpass\nWAYLAND_DISPLAY=wayland-0\n' > ~/.config/environment.d/50-ssh-askpass.conf
 systemctl --user set-environment SSH_ASKPASS=/usr/libexec/seahorse/ssh-askpass
 systemctl --user restart gcr-ssh-agent.service   # vide les clés chargées
 ```
 
+`just ssh-fido2-readonly` détecte la course : un agent lancé sans `WAYLAND_DISPLAY` ni `DISPLAY` donne `AGENT_STARTED_WITHOUT_DISPLAY` (**NO-GO**).
+
+**Fetch en arrière-plan (constaté le 03/11)** : `BatchMode=yes` n'empêche pas l'agent d'ouvrir la fenêtre de PIN. Un `git fetch` automatique (ici l'application Claude, toutes les ~10 min) l'ouvre donc, et l'agent reste bloqué pour tous les clients jusqu'à la réponse. Retrouver l'origine : `pgrep -a -x ssh`, puis remonter les parents. Annuler une fenêtre ne consomme aucun essai de PIN.
+
+**Choix du 03/11 : la YubiKey pour le push seulement.** Dans `~/.gitconfig` (dotfiles), `url."https://github.com/".insteadOf` envoie les fetch en HTTPS avec le jeton `gh` (`credential."https://github.com".helper = !gh auth git-credential`), et `url."git@github.com:".pushInsteadOf` renvoie les push en SSH. Contrôle sans réseau : `git remote get-url origin` donne `https://…`, `git remote get-url --push origin` donne `git@github.com:…`.
+
 Contournement ponctuel sans agent : `SSH_AUTH_SOCK= SSH_ASKPASS_REQUIRE=never ssh …`.
+
+## Saisie du PIN
+
+Constaté les 03 et 04/11 : 6 PIN refusés via les fenêtres de l'agent, alors que le même PIN était accepté en terminal.
+
+- **Une seule clé branchée : le PIN part vers elle, quelle que soit la clé nommée.** Une fenêtre `Drx5…` (principale) avec la secondaire seule consomme un essai de la secondaire. Annuler toute fenêtre qui nomme une clé absente : annuler ne coûte aucun essai.
+- Saisir le PIN en terminal plutôt que dans la fenêtre seahorse, après l'avoir tapé une fois en clair (chiffres AZERTY : Maj ou pavé numérique).
+- Taper le PIN et toucher la clé en moins de 2 minutes : au-delà, GitHub coupe (`Received disconnect … Bye Bye`), sans perte d'essai.
+- Ouvrir la connexion GitHub du jour sans agent et avec une seule clé, puis pousser par elle :
+
+```bash
+SSH_AUTH_SOCK= ssh -F /dev/null -o IdentitiesOnly=yes -o ControlMaster=auto -o 'ControlPath=~/.ssh/cm-%r@%h:%p' -o ControlPersist=8h -i ~/.ssh/id_ed25519_sk -T git@github.com
+```
+
+- Compteur bas : `ykman fido access verify-pin`, clé seule branchée, ou `ykman --device <série> fido access verify-pin` avec les deux ; un PIN correct le remet à 8. Si le PIN est refusé, s'arrêter et le retrouver avant tout autre essai.
 
 ## Vérification
 
