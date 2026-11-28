@@ -1,5 +1,7 @@
 # Roadmap — extraction YubiKey / age / SOPS (30 octobre 2026)
 
+> Réconciliation mise à jour le 2026-11-28 (master 3a95bc2)
+
 > **Source de vérité cible :** `nabla-yubikey`. Cette roadmap suit uniquement le code client et les procédures matérielles. L'infrastructure NFS/ZFS et les exports appartiennent à `nabla-compose` ; les dépendances Ubuntu à `ansible-workstation`. Le dépôt public ne contient aucun secret. **Aucune opération sur la carte n'est autorisée par ce document.**
 
 ## État vérifié dans Git
